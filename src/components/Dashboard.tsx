@@ -593,28 +593,33 @@ export function Dashboard({ onLogout }: Props) {
     const total = filtered.length;
     let failed = 0;
     const failedReasons: string[] = [];
-    for (let i = 0; i < filtered.length; i++) {
-      setBulkDeleteProgress({ done: i, total });
-      try {
-        await api.deleteActivity(filtered[i].id);
-      } catch (err) {
-        failed++;
-        failedReasons.push(err instanceof Error ? err.message : "unknown");
-        console.error(`Failed to delete activity ${filtered[i].id}:`, err);
+    try {
+      for (let i = 0; i < filtered.length; i++) {
+        setBulkDeleteProgress({ done: i, total });
+        try {
+          await api.deleteActivity(filtered[i].id);
+        } catch (err) {
+          failed++;
+          failedReasons.push(err instanceof Error ? err.message : "unknown");
+          console.error(`Failed to delete activity ${filtered[i].id}:`, err);
+        }
       }
+      setBulkDeleteProgress({ done: total, total });
+      if (selectedActivity && filtered.some((a) => a.id === selectedActivity.id)) {
+        await selectActivity(null);
+      }
+      await refresh();
+      setImportMessage(
+        failed > 0
+          ? `Bulk delete finished with ${failed} failure(s): ${failedReasons.slice(0, 2).join(" | ")}`
+          : "Bulk delete completed."
+      );
+    } catch (err) {
+      setImportMessage(`Bulk delete completed, but refresh failed: ${err instanceof Error ? err.message : "unknown"}`);
+    } finally {
+      setIsBulkDeleting(false);
+      setBulkDeleteProgress(null);
     }
-    setBulkDeleteProgress({ done: total, total });
-    if (selectedActivity && filtered.some((a) => a.id === selectedActivity.id)) {
-      await selectActivity(null);
-    }
-    await refresh();
-    setIsBulkDeleting(false);
-    setBulkDeleteProgress(null);
-    setImportMessage(
-      failed > 0
-        ? `Bulk delete finished with ${failed} failure(s): ${failedReasons.slice(0, 2).join(" | ")}`
-        : "Bulk delete completed."
-    );
   }
 
   function clearFilters() {

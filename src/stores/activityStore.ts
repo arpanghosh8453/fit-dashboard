@@ -26,13 +26,17 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   async refresh() {
     set({ loading: true });
-    const [activities, overview] = await Promise.all([api.listActivities(), api.getOverview()]);
-    set({ activities, overview, loading: false });
+    try {
+      const [activities, overview] = await Promise.all([api.listActivities(), api.getOverview()]);
+      set({ activities, overview });
 
-    if (get().selectedActivity) {
-      const id = get().selectedActivity!.id;
-      const records = await api.getRecords(id);
-      set({ records });
+      if (get().selectedActivity) {
+        const id = get().selectedActivity!.id;
+        const records = await api.getRecords(id);
+        set({ records });
+      }
+    } finally {
+      set({ loading: false });
     }
   },
 
