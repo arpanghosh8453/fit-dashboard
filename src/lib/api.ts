@@ -102,7 +102,7 @@ export const api = {
   async importFit(file: File) {
     if (isTauri) {
       const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-      return invoke("import_fit_bytes", { fileName: file.name, bytes });
+      return invoke("import_fit_bytes", { file_name: file.name, bytes });
     }
 
     const fd = new FormData();
@@ -156,7 +156,7 @@ export const api = {
 
   async getRecords(activityId: number, resolutionMs = 10000): Promise<RecordPoint[]> {
     if (isTauri) {
-      return invoke("get_records", { activityId, resolutionMs });
+      return invoke("get_records", { activity_id: activityId, resolution_ms: resolutionMs });
     }
     const res = await webClient.get(`/records/${activityId}`, {
       params: { resolution_ms: resolutionMs }
@@ -166,14 +166,14 @@ export const api = {
 
   async renameActivity(activityId: number, name: string) {
     if (isTauri) {
-      return invoke("rename_activity", { activityId, name });
+      return invoke("rename_activity", { activity_id: activityId, name });
     }
     await webClient.patch(`/activities/${activityId}`, { name });
   },
 
   async deleteActivity(activityId: number) {
     if (isTauri) {
-      return invoke("delete_activity", { activityId });
+      return invoke("delete_activity", { activity_id: activityId });
     }
     await webClient.delete(`/activities/${activityId}`);
   },

@@ -22,6 +22,10 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tauri = { version = "2", optional = true }
+
+[build-dependencies]
+tauri-build = "2"
 
 # Optional desktop mode
 # tauri and tauri-plugin-shell can be enabled if you want to compile desktop binaries immediately.
@@ -29,4 +33,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [features]
 default = ["web"]
 web = []
-tauri-app = []
+tauri-app = ["dep:tauri"]

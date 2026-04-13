@@ -115,20 +115,18 @@ async fn main() -> Result<()> {
         "backend storage configured"
     );
 
+    #[cfg(feature = "tauri-app")]
+    {
+        tauri_app::run(state)?;
+        return Ok(());
+    }
+
     #[cfg(feature = "web")]
     {
         let app = server::app(state);
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
         tracing::info!("Server listening on http://0.0.0.0:8080");
         axum::serve(listener, app).await?;
-        return Ok(());
-    }
-
-    #[cfg(feature = "tauri-app")]
-    {
-        let _ = state;
-        // Tauri bootstrap can be wired here with #[tauri::command] wrappers.
-        // This scaffold keeps logic in tauri_app.rs for direct integration.
         return Ok(());
     }
 
