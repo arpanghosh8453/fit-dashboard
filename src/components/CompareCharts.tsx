@@ -24,6 +24,7 @@ const formatRelTime = (ms: number) => {
 export function CompareCharts({ compareIds, activities, theme }: Props) {
   const [loading, setLoading] = useState(false);
   const [dataSets, setDataSets] = useState<{ name: string; records: RecordPoint[] }[]>([]);
+  const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,18 +134,40 @@ export function CompareCharts({ compareIds, activities, theme }: Props) {
       splitLine: { lineStyle: { color: gridLine } },
     },
     dataZoom: [
-      { type: "inside", zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false },
-      { type: "slider", height: 18, borderColor: "transparent", backgroundColor: gridLine, labelFormatter: (val: number) => formatRelTime(val) },
+      {
+        type: "inside",
+        zoomOnMouseWheel: "ctrl",
+        moveOnMouseWheel: false,
+        moveOnMouseMove: false,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
     ],
     series: buildSeries(key, title),
   });
 
+  const zoomEvents = {
+    datazoom: (evt: any) => {
+      const batch = evt?.batch?.[0];
+      const start = typeof batch?.start === "number" ? batch.start : (typeof evt?.start === "number" ? evt.start : null);
+      const end = typeof batch?.end === "number" ? batch.end : (typeof evt?.end === "number" ? evt.end : null);
+      if (start !== null && end !== null) {
+        setZoomRange({ start, end });
+      }
+    },
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <div className="panel"><ReactECharts option={createOption("Heart Rate", "bpm", "heart_rate")} style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Speed", "m/s", "speed_m_s")} style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Power", "W", "power")} style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Altitude", "m", "altitude_m")} style={{ height: 320, width: "100%" }} /></div>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button className="btn-secondary" onClick={() => setZoomRange(null)}>
+          Reset Zoom
+        </button>
+      </div>
+      <div className="panel"><ReactECharts option={createOption("Heart Rate", "bpm", "heart_rate")} onEvents={zoomEvents} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Speed", "m/s", "speed_m_s")} onEvents={zoomEvents} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Power", "W", "power")} onEvents={zoomEvents} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Altitude", "m", "altitude_m")} onEvents={zoomEvents} notMerge style={{ height: 320, width: "100%" }} /></div>
     </div>
   );
 }

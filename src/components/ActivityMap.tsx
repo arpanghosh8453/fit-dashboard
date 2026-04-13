@@ -8,6 +8,7 @@ type Props = {
   records: RecordPoint[];
   mapStyle: MapStyle;
   setMapStyle: (style: MapStyle) => void;
+  lapTimestampsUtc?: string[];
 };
 
 type PathColorMode = "solid" | "speed" | "heart_rate" | "cadence" | "altitude" | "power" | "temperature" | "time";
@@ -228,7 +229,7 @@ function formatElapsed(totalSeconds: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function buildTooltipHtml(props: Record<string, any>): string {
+function buildTooltipHtml(props: Record<string, any>, distanceUnit: "km" | "mi"): string {
   const asFiniteNumber = (value: unknown): number | null => {
     if (value === null || value === undefined || value === "") return null;
     const n = Number(value);
@@ -273,8 +274,11 @@ function buildTooltipHtml(props: Record<string, any>): string {
   );
 
   const rows: string[] = [];
-  if (speed !== null && speed > 0)
-    rows.push(row("speed", "Speed", `${fmt2(speed)} km/h`));
+  if (speed !== null && speed > 0) {
+    const speedValue = distanceUnit === "mi" ? speed / 1.609344 : speed;
+    const speedUnit = distanceUnit === "mi" ? "mi/h" : "km/h";
+    rows.push(row("speed", "Speed", `${fmt2(speedValue)} ${speedUnit}`));
+  }
   if (heartRate !== null && heartRate > 0)
     rows.push(row("heart", "Heart", `${fmt2(heartRate)} bpm`));
   if (altitude !== null && altitude > 0)
@@ -295,16 +299,58 @@ function buildTooltipHtml(props: Record<string, any>): string {
 const SOURCE_ID = "activity-route";
 const HIT_SOURCE_ID = "activity-route-hit-source";
 const MARKER_SOURCE_ID = "activity-route-markers";
+const LAP_SOURCE_ID = "activity-route-lap-markers";
+const OUTLINE_LAYER_ID = "activity-route-outline-layer";
 const LAYER_ID = "activity-route-layer";
 const HIT_LAYER_ID = "activity-route-hit";
 const MARKER_LAYER_ID = "activity-route-markers-layer";
 const MARKER_LABEL_LAYER_ID = "activity-route-markers-label-layer";
+const LAP_LAYER_ID = "activity-route-lap-markers-layer";
+const LAP_LABEL_LAYER_ID = "activity-route-lap-markers-label-layer";
 
-export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
+function buildLapMarkerGeoJson(gpsRecs: RecordPoint[], lapTimestampsUtc: string[]): GeoJSON.FeatureCollection<GeoJSON.Geometry> {
+  if (!gpsRecs.length || !lapTimestampsUtc.length) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const features: GeoJSON.Feature<GeoJSON.Geometry>[] = [];
+  for (let i = 0; i < lapTimestampsUtc.length; i++) {
+    const tsMs = Date.parse(lapTimestampsUtc[i]);
+    if (!Number.isFinite(tsMs)) continue;
+
+    let nearestIdx = -1;
+    let nearestDelta = Number.POSITIVE_INFINITY;
+    for (let j = 0; j < gpsRecs.length; j++) {
+      const rec = gpsRecs[j];
+      if (typeof rec.latitude !== "number" || typeof rec.longitude !== "number") continue;
+      const delta = Math.abs(rec.timestamp_ms - tsMs);
+      if (delta < nearestDelta) {
+        nearestDelta = delta;
+        nearestIdx = j;
+      }
+    }
+
+    if (nearestIdx < 0) continue;
+    const rec = gpsRecs[nearestIdx];
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [rec.longitude as number, rec.latitude as number] },
+      properties: {
+        label: String(i + 1),
+        ts: lapTimestampsUtc[i],
+      }
+    });
+  }
+
+  return { type: "FeatureCollection", features };
+}
+
+export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc = [] }: Props) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const theme = useSettingsStore((s) => s.theme);
+  const distanceUnit = useSettingsStore((s) => s.distanceUnit);
 
   const [pathColorMode, setPathColorMode] = useState<PathColorMode>("heart_rate");
   const pathColorModeRef = useRef(pathColorMode);
@@ -323,9 +369,11 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
 
   const gpsRecordsRef = useRef(gpsRecords);
   const coordinatesRef = useRef(coordinates);
+  const distanceUnitRef = useRef(distanceUnit);
 
   useEffect(() => { coordinatesRef.current = coordinates; }, [coordinates]);
   useEffect(() => { gpsRecordsRef.current = gpsRecords; }, [gpsRecords]);
+  useEffect(() => { distanceUnitRef.current = distanceUnit; }, [distanceUnit]);
   useEffect(() => { pathColorModeRef.current = pathColorMode; }, [pathColorMode]);
 
   /* ── Draw route ─────────────────────────────────────────────── */
@@ -337,10 +385,14 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
     const solidPathColor = "#d65252";
 
     if (!coords.length) {
+      if (map.getLayer(LAP_LABEL_LAYER_ID)) map.removeLayer(LAP_LABEL_LAYER_ID);
+      if (map.getLayer(LAP_LAYER_ID)) map.removeLayer(LAP_LAYER_ID);
       if (map.getLayer(MARKER_LABEL_LAYER_ID)) map.removeLayer(MARKER_LABEL_LAYER_ID);
       if (map.getLayer(MARKER_LAYER_ID)) map.removeLayer(MARKER_LAYER_ID);
       if (map.getLayer(HIT_LAYER_ID)) map.removeLayer(HIT_LAYER_ID);
+      if (map.getLayer(OUTLINE_LAYER_ID)) map.removeLayer(OUTLINE_LAYER_ID);
       if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID);
+      if (map.getSource(LAP_SOURCE_ID)) map.removeSource(LAP_SOURCE_ID);
       if (map.getSource(MARKER_SOURCE_ID)) map.removeSource(MARKER_SOURCE_ID);
       if (map.getSource(HIT_SOURCE_ID)) map.removeSource(HIT_SOURCE_ID);
       if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
@@ -350,18 +402,33 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
     const hitGeojson = buildColoredGeoJson(gpsRecs, coords, mode, solidPathColor);
     const displayGeojson = buildSolidDisplayGeoJson(coords, solidPathColor);
     const markerGeojson = buildMarkerGeoJson(coords);
+    const lapMarkerGeojson = buildLapMarkerGeoJson(gpsRecs, lapTimestampsUtc);
     const gradientExpr = buildGradientExpression(gpsRecs, mode, solidPathColor);
     const existingHit = map.getSource(HIT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     const existingMarkers = map.getSource(MARKER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    const existingLapMarkers = map.getSource(LAP_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
 
     // Always recreate the display source/layer so lineMetrics is guaranteed on hot reloads.
-    if (map.getLayer(LAYER_ID)) {
-      map.removeLayer(LAYER_ID);
-    }
+    if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID);
+    if (map.getLayer(OUTLINE_LAYER_ID)) map.removeLayer(OUTLINE_LAYER_ID);
     if (map.getSource(SOURCE_ID)) {
       map.removeSource(SOURCE_ID);
     }
     map.addSource(SOURCE_ID, { type: "geojson", data: displayGeojson, lineMetrics: true });
+
+    // Diffused black outline under the route for better edge contrast.
+    map.addLayer({
+      id: OUTLINE_LAYER_ID,
+      type: "line",
+      source: SOURCE_ID,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-width": 8,
+        "line-color": "#000000",
+        "line-opacity": 0.62,
+        "line-blur": 2.2,
+      }
+    });
 
     if (existingHit) {
       existingHit.setData(hitGeojson);
@@ -373,6 +440,12 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
       existingMarkers.setData(markerGeojson);
     } else {
       map.addSource(MARKER_SOURCE_ID, { type: "geojson", data: markerGeojson });
+    }
+
+    if (existingLapMarkers) {
+      existingLapMarkers.setData(lapMarkerGeojson);
+    } else {
+      map.addSource(LAP_SOURCE_ID, { type: "geojson", data: lapMarkerGeojson });
     }
 
     map.addLayer({
@@ -435,6 +508,36 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
       });
     }
 
+    if (!map.getLayer(LAP_LAYER_ID)) {
+      map.addLayer({
+        id: LAP_LAYER_ID,
+        type: "circle",
+        source: LAP_SOURCE_ID,
+        paint: {
+          "circle-radius": 7,
+          "circle-color": "#0ea5e9",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5
+        }
+      });
+    }
+
+    if (!map.getLayer(LAP_LABEL_LAYER_ID)) {
+      map.addLayer({
+        id: LAP_LABEL_LAYER_ID,
+        type: "symbol",
+        source: LAP_SOURCE_ID,
+        layout: {
+          "text-field": ["get", "label"] as any,
+          "text-size": 10,
+          "text-font": ["Open Sans Bold"]
+        },
+        paint: {
+          "text-color": "#ffffff"
+        }
+      });
+    }
+
     if (fitToRoute) {
       const bounds = coords.reduce(
         (b, c) => b.extend(c as [number, number]),
@@ -442,6 +545,17 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
       );
       map.fitBounds(bounds, { padding: 40, maxZoom: 16, duration: 550 });
     }
+  }
+
+  function resetZoomToRoute() {
+    const map = mapRef.current;
+    const coords = coordinatesRef.current;
+    if (!map || !coords.length) return;
+    const bounds = coords.reduce(
+      (b, c) => b.extend(c as [number, number]),
+      new maplibregl.LngLatBounds(coords[0] as [number, number], coords[0] as [number, number])
+    );
+    map.fitBounds(bounds, { padding: 40, maxZoom: 16, duration: 550 });
   }
 
   /* ── Map lifecycle ──────────────────────────────────────────── */
@@ -473,7 +587,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
       if (!e.features?.[0]) return;
       map.getCanvas().style.cursor = "crosshair";
       const props = e.features[0].properties as Record<string, any>;
-      popup.setLngLat(e.lngLat).setHTML(buildTooltipHtml(props)).addTo(map);
+      popup.setLngLat(e.lngLat).setHTML(buildTooltipHtml(props, distanceUnitRef.current)).addTo(map);
     });
 
     map.on("mouseleave", HIT_LAYER_ID, () => {
@@ -519,7 +633,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
       map.on("idle", onIdle);
       return () => { map.off("idle", onIdle); };
     }
-  }, [coordinates]);
+  }, [coordinates, lapTimestampsUtc]);
 
   // Redraw when color mode changes (don't re-fit)
   useEffect(() => {
@@ -558,7 +672,12 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
         </div>
       </div>
 
-      <div ref={mapContainerRef} className="map-canvas" />
+      <div className="map-canvas-wrap">
+        <div ref={mapContainerRef} className="map-canvas" />
+        <button className="btn-outline-secondary map-reset-zoom-btn" onClick={resetZoomToRoute}>
+          Reset zoom
+        </button>
+      </div>
 
       {pathColorMode !== "solid" && coordinates.length > 0 && (
         <div className="color-legend">

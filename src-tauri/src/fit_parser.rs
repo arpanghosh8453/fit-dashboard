@@ -8,14 +8,20 @@ use crate::models::{ParsedActivity, RecordPoint};
 
 fn value_f64(v: &Value) -> Option<f64> {
     match v {
+        Value::Byte(x) => Some(*x as f64),
+        Value::Enum(x) => Some(*x as f64),
         Value::SInt8(x) => Some(*x as f64),
         Value::UInt8(x) => Some(*x as f64),
+        Value::UInt8z(x) => Some(*x as f64),
         Value::SInt16(x) => Some(*x as f64),
         Value::UInt16(x) => Some(*x as f64),
+        Value::UInt16z(x) => Some(*x as f64),
         Value::SInt32(x) => Some(*x as f64),
         Value::UInt32(x) => Some(*x as f64),
+        Value::UInt32z(x) => Some(*x as f64),
         Value::SInt64(x) => Some(*x as f64),
         Value::UInt64(x) => Some(*x as f64),
+        Value::UInt64z(x) => Some(*x as f64),
         Value::Float32(x) => Some(*x as f64),
         Value::Float64(x) => Some(*x),
         _ => None,
@@ -30,6 +36,44 @@ fn value_string(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+fn combine_device_name(
+    product_name: Option<String>,
+    manufacturer: Option<String>,
+    product: Option<String>,
+) -> Option<String> {
+    let from_product_name = product_name
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if from_product_name.is_some() {
+        return from_product_name;
+    }
+
+    let manufacturer = manufacturer
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let product = product
+        .map(|s| s.trim().to_string())
+        .and_then(|s| {
+            // Many FIT files provide only numeric product IDs (e.g. "4625")
+            // or unknown placeholders. Avoid surfacing these as user-facing names.
+            let lower = s.to_lowercase();
+            let is_numeric_only = s.chars().all(|c| c.is_ascii_digit());
+            let is_unknown_variant = lower.starts_with("unknown_variant_");
+            if s.is_empty() || is_numeric_only || is_unknown_variant {
+                None
+            } else {
+                Some(s)
+            }
+        });
+
+    match (manufacturer, product) {
+        (Some(m), Some(p)) => Some(format!("{} {}", m, p)),
+        (Some(m), None) => Some(m),
+        (None, Some(p)) => Some(p),
+        (None, None) => None,
     }
 }
 
@@ -52,6 +96,14 @@ fn parse_timestamp_ms(raw: &str) -> Option<i64> {
         return Some(dt.and_utc().timestamp_millis());
     }
     None
+}
+
+fn value_timestamp_ms(v: &Value) -> Option<i64> {
+    match v {
+        Value::Timestamp(dt) => Some(dt.timestamp_millis()),
+        Value::String(s) => parse_timestamp_ms(s),
+        _ => None,
+    }
 }
 
 fn strip_known_extension(file_name: &str) -> String {
@@ -218,6 +270,25 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut points: Vec<RecordPoint> = Vec::new();
     let mut sport = String::from("unknown");
     let mut device = String::new();
+    let mut file_id_product_name: Option<String> = None;
+    let mut file_id_manufacturer: Option<String> = None;
+    let mut file_id_product: Option<String> = None;
+    let mut file_id_serial_number: Option<i64> = None;
+    let mut device_info_fallback_name: Option<String> = None;
+    let mut device_info_fallback_serial: Option<i64> = None;
+    let mut device_info_creator_name: Option<String> = None;
+    let mut device_info_creator_serial: Option<i64> = None;
+    let mut vo2_max: Option<f64> = None;
+
+    let mut session_beginning_body_battery: Option<i64> = None;
+    let mut session_ending_body_battery: Option<i64> = None;
+    let mut session_max_heart_rate: Option<i64> = None;
+    let mut session_avg_heart_rate: Option<i64> = None;
+    let mut session_max_cadence: Option<i64> = None;
+    let mut session_avg_cadence: Option<i64> = None;
+    let mut session_total_elapsed_time_s: Option<f64> = None;
+    let mut session_total_distance_m: Option<f64> = None;
+    let mut lap_ranges: Vec<serde_json::Value> = Vec::new();
 
     let mut min_ts: Option<i64> = None;
     let mut max_ts: Option<i64> = None;
@@ -283,16 +354,132 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             }
         } else if rec.kind() == MesgNum::Session {
             for field in rec.fields() {
-                if field.name() == "sport" {
-                    sport = value_string(field.value()).to_lowercase();
+                match field.name() {
+                    "sport" => sport = value_string(field.value()).to_lowercase(),
+                    "beginning_body_battery" | "start_body_battery" => {
+                        session_beginning_body_battery = value_i64(field.value())
+                    }
+                    "ending_body_battery" | "end_body_battery" => {
+                        session_ending_body_battery = value_i64(field.value())
+                    }
+                    "max_heart_rate" => session_max_heart_rate = value_i64(field.value()),
+                    "avg_heart_rate" => session_avg_heart_rate = value_i64(field.value()),
+                    "max_cadence" => session_max_cadence = value_i64(field.value()),
+                    "avg_cadence" => session_avg_cadence = value_i64(field.value()),
+                    "total_elapsed_time" => session_total_elapsed_time_s = value_f64(field.value()),
+                    "total_distance" => session_total_distance_m = value_f64(field.value()),
+                    _ => {}
                 }
             }
         } else if rec.kind() == MesgNum::DeviceInfo {
+            let mut candidate_product_name: Option<String> = None;
+            let mut candidate_manufacturer: Option<String> = None;
+            let mut candidate_product: Option<String> = None;
+            let mut candidate_serial: Option<i64> = None;
+            let mut is_creator = false;
+
             for field in rec.fields() {
-                if field.name() == "product_name" {
-                    device = value_string(field.value());
+                match field.name() {
+                    "device_index" => {
+                        let v = value_string(field.value()).to_lowercase();
+                        if v == "creator" || value_i64(field.value()) == Some(0) {
+                            is_creator = true;
+                        }
+                    }
+                    "product_name" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            candidate_product_name = Some(value);
+                        }
+                    }
+                    "manufacturer" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            candidate_manufacturer = Some(value);
+                        }
+                    }
+                    "garmin_product" | "product" | "favero_product" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            candidate_product = Some(value);
+                        }
+                    }
+                    "serial_number" => {
+                        candidate_serial = value_i64(field.value()).filter(|v| *v > 0);
+                    }
+                    _ => {}
                 }
             }
+
+            let candidate_name = combine_device_name(
+                candidate_product_name,
+                candidate_manufacturer,
+                candidate_product,
+            );
+
+            if device_info_fallback_name.is_none() {
+                device_info_fallback_name = candidate_name.clone();
+            }
+            if device_info_fallback_serial.is_none() {
+                device_info_fallback_serial = candidate_serial;
+            }
+
+            if is_creator {
+                device_info_creator_name = candidate_name;
+                device_info_creator_serial = candidate_serial;
+            }
+        } else if rec.kind() == MesgNum::FileId {
+            for field in rec.fields() {
+                match field.name() {
+                    "product_name" => {
+                        let value = value_string(field.value());
+                        if !value.is_empty() {
+                            file_id_product_name = Some(value);
+                        }
+                    }
+                    "manufacturer" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            file_id_manufacturer = Some(value);
+                        }
+                    }
+                    "garmin_product" | "product" | "favero_product" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            file_id_product = Some(value);
+                        }
+                    }
+                    "serial_number" => {
+                        file_id_serial_number = value_i64(field.value()).filter(|v| *v > 0);
+                    }
+                    _ => {}
+                }
+            }
+        } else if rec.kind() == MesgNum::MaxMetData {
+            for field in rec.fields() {
+                if field.name() == "vo2_max" {
+                    vo2_max = value_f64(field.value());
+                }
+            }
+        } else if rec.kind() == MesgNum::Lap {
+            let mut lap_start_ms: Option<i64> = None;
+            let mut lap_end_ms: Option<i64> = None;
+            for field in rec.fields() {
+                match field.name() {
+                    "start_time" => lap_start_ms = value_timestamp_ms(field.value()),
+                    "timestamp" => lap_end_ms = value_timestamp_ms(field.value()),
+                    _ => {}
+                }
+            }
+
+            lap_ranges.push(serde_json::json!({
+                "start_ts_utc": lap_start_ms
+                    .and_then(chrono::DateTime::from_timestamp_millis)
+                    .map(|dt| dt.to_rfc3339()),
+                "end_ts_utc": lap_end_ms
+                    .and_then(chrono::DateTime::from_timestamp_millis)
+                    .map(|dt| dt.to_rfc3339())
+            }));
         }
     }
 
@@ -305,11 +492,53 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let duration_s = ((end_ts - start_ts).max(0) as f64) / 1000.0;
     let distance_m = total_distance_m(&points);
 
+    let file_id_combined_name = combine_device_name(
+        file_id_product_name.clone(),
+        file_id_manufacturer,
+        file_id_product,
+    );
+
+    if device.is_empty() {
+        device = device_info_creator_name
+            .clone()
+            .or(file_id_combined_name.clone())
+            .or(device_info_fallback_name.clone())
+            .unwrap_or_default();
+    }
+
+    let resolved_serial_number = file_id_serial_number
+        .or(device_info_creator_serial)
+        .or(device_info_fallback_serial);
+
     let metadata_json = serde_json::json!({
         "record_count": points.len(),
         "device": device,
         "sport": sport,
-        "source_format": "fit"
+        "source_format": "fit",
+        "file_id": {
+            "product_name": file_id_combined_name,
+            "serial_number": resolved_serial_number
+        },
+        "device_info": {
+            "creator_product_name": device_info_creator_name,
+            "creator_serial_number": device_info_creator_serial,
+            "fallback_product_name": device_info_fallback_name,
+            "fallback_serial_number": device_info_fallback_serial
+        },
+        "activity_metrics": {
+            "vo2_max": vo2_max
+        },
+        "session": {
+            "beginning_body_battery": session_beginning_body_battery,
+            "ending_body_battery": session_ending_body_battery,
+            "max_heart_rate": session_max_heart_rate,
+            "avg_heart_rate": session_avg_heart_rate,
+            "max_cadence": session_max_cadence,
+            "avg_cadence": session_avg_cadence,
+            "total_elapsed_time_s": session_total_elapsed_time_s,
+            "total_distance_m": session_total_distance_m
+        },
+        "laps": lap_ranges
     })
     .to_string();
 

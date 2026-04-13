@@ -5,6 +5,8 @@ import { ActivityChart } from "./ActivityChart";
 import { ActivityMap } from "./ActivityMap";
 import { CompareCharts } from "./CompareCharts";
 import { ActivityInsights } from "./ActivityInsights";
+import { ActivityContributionHeatmap } from "./ActivityContributionHeatmap";
+import { OverviewLocationMap } from "./OverviewLocationMap";
 import { DatePickerPopover } from "./DatePickerPopover";
 import { DateRange } from "react-day-picker";
 import { DonationBanner } from "./DonationBanner";
@@ -18,6 +20,30 @@ import type { Activity, RecordPoint } from "../types";
 import appIcon from "../assets/app-icon.svg";
 
 type Props = { onLogout: () => Promise<void> };
+
+type ActivityMetadata = {
+  file_id?: {
+    product_name?: string | null;
+    serial_number?: number | null;
+  };
+  activity_metrics?: {
+    vo2_max?: number | null;
+  };
+  session?: {
+    beginning_body_battery?: number | null;
+    ending_body_battery?: number | null;
+    max_heart_rate?: number | null;
+    avg_heart_rate?: number | null;
+    max_cadence?: number | null;
+    avg_cadence?: number | null;
+    total_elapsed_time_s?: number | null;
+    total_distance_m?: number | null;
+  };
+  laps?: Array<{
+    start_ts_utc?: string | null;
+    end_ts_utc?: string | null;
+  }>;
+};
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -35,6 +61,23 @@ function formatDurationShort(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60);
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+function formatPace(secondsPerUnit: number, unit: string): string {
+  if (!Number.isFinite(secondsPerUnit) || secondsPerUnit <= 0) return "-";
+  const min = Math.floor(secondsPerUnit / 60);
+  const sec = Math.floor(secondsPerUnit % 60);
+  return `${min}:${String(sec).padStart(2, "0")} /${unit}`;
+}
+
+function parseActivityMetadata(raw?: string): ActivityMetadata | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as ActivityMetadata;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function isTauriRuntime(): boolean {
@@ -217,6 +260,7 @@ export function Dashboard({ onLogout }: Props) {
   const [isSortOpen, setIsSortOpen] = useState(false);
   const [overviewRecords, setOverviewRecords] = useState<RecordPoint[]>([]);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; activityId: number; activityName: string;
   } | null>(null);
@@ -232,9 +276,9 @@ export function Dashboard({ onLogout }: Props) {
     filterSport, setFilterSport, selectActivity, refresh
   } = useActivityStore();
   const {
-    distanceUnit, timeFormat, supporterBadge, donationDismissed,
+    distanceUnit, timeFormat, supporterBadge,
     toggleSettings, setTheme, mapStyle, setMapStyle,
-    verifySupporterCode, dismissDonationBanner, loadSupporterStatus, theme,
+    loadSupporterStatus, theme,
   } = useSettingsStore();
 
   useEffect(() => {
@@ -306,8 +350,7 @@ export function Dashboard({ onLogout }: Props) {
           if (!cancelled) setOverviewRecords([]);
           return;
         }
-        const sample = filtered.slice(0, 40);
-        const chunks = await Promise.all(sample.map((a) => api.getRecords(a.id, 45_000).catch(() => [])));
+        const chunks = await Promise.all(filtered.map((a) => api.getRecords(a.id, 45_000).catch(() => [])));
         const merged = chunks.flat().sort((a, b) => a.timestamp_ms - b.timestamp_ms);
         if (!cancelled) setOverviewRecords(merged);
       } finally {
@@ -764,6 +807,58 @@ export function Dashboard({ onLogout }: Props) {
         ? (importProgress.currentIndex ?? importProgress.completed)
         : importProgress.completed)
     : 0;
+  const selectedMetadata = useMemo(
+    () => parseActivityMetadata(selectedActivity?.metadata_json),
+    [selectedActivity?.metadata_json]
+  );
+  const lapTimestampsUtc = useMemo(
+    () => (selectedMetadata?.laps ?? [])
+      .map((lap) => lap.start_ts_utc ?? lap.end_ts_utc ?? "")
+      .filter((ts) => !!ts),
+    [selectedMetadata]
+  );
+  const deviceBadgeSerial = typeof selectedMetadata?.file_id?.serial_number === "number"
+    ? String(selectedMetadata.file_id.serial_number)
+    : "";
+  const detailStats = useMemo(() => {
+    if (!selectedActivity) return [] as Array<{ key: string; label: string; value: string; secondary?: string; icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "avg" }>;
+    const out: Array<{ key: string; label: string; value: string; secondary?: string; icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "avg" }> = [];
+    const seen = new Set<string>();
+    const push = (key: string, label: string, value: string | null | undefined, icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "avg", secondary?: string) => {
+      if (!value || seen.has(key)) return;
+      seen.add(key);
+      out.push({ key, label, value, secondary, icon });
+    };
+
+    push("duration", "Duration", formatDuration(selectedActivity.duration_s), "clock");
+    push("distance", "Distance", `${(selectedActivity.distance_m / distanceDivisor).toFixed(2)} ${distanceSuffix}`, "distance");
+
+    if (recordStats.avgSpeed > 0) push("avg_speed", "Avg Speed", `${recordStats.avgSpeed.toFixed(1)} km/h`, "speed");
+    if (recordStats.maxSpeed > 0) push("max_speed", "Max Speed", `${recordStats.maxSpeed.toFixed(1)} km/h`, "speed");
+
+    const session = selectedMetadata?.session ?? {};
+    const metric = selectedMetadata?.activity_metrics ?? {};
+    const avgPaceSec = selectedActivity.distance_m > 0
+      ? selectedActivity.duration_s / (selectedActivity.distance_m / distanceDivisor)
+      : 0;
+    const avgPaceText = formatPace(avgPaceSec, distanceSuffix);
+    const avgHr = recordStats.avgHr > 0 ? Math.round(recordStats.avgHr) : (typeof session.avg_heart_rate === "number" ? session.avg_heart_rate : null);
+    const maxHr = recordStats.maxHr > 0 ? recordStats.maxHr : (typeof session.max_heart_rate === "number" ? session.max_heart_rate : null);
+    if (avgHr && avgHr > 0) push("avg_hr", "Avg HR", `${Math.round(avgHr)} bpm`, "heart", avgPaceText !== "-" ? `Pace ${avgPaceText}` : undefined);
+    if (maxHr && maxHr > 0) push("max_hr", "Max HR", `${Math.round(maxHr)} bpm`, "heart");
+
+    if (recordStats.maxAlt > 0) push("max_alt", "Max Altitude", `${recordStats.maxAlt.toFixed(0)} m`, "mountain");
+    if (recordStats.avgPower > 0) push("avg_power", "Avg Power", `${Math.round(recordStats.avgPower)} W`, "power");
+
+    if (typeof session.avg_cadence === "number" && session.avg_cadence > 0) push("avg_cadence", "Avg Cadence", `${Math.round(session.avg_cadence)} rpm`, "avg");
+    if (typeof session.max_cadence === "number" && session.max_cadence > 0) push("max_cadence", "Max Cadence", `${Math.round(session.max_cadence)} rpm`, "avg");
+    if (typeof session.beginning_body_battery === "number") push("bb_start", "Body Battery Start", `${session.beginning_body_battery}`, "avg");
+    if (typeof session.ending_body_battery === "number") push("bb_end", "Body Battery End", `${session.ending_body_battery}`, "avg");
+    if (typeof metric.vo2_max === "number" && metric.vo2_max > 0) push("vo2_max", "VO2 Max", `${metric.vo2_max.toFixed(1)}`, "avg");
+    if (lapTimestampsUtc.length > 0) push("laps", "Laps", String(lapTimestampsUtc.length), "avg");
+
+    return out;
+  }, [selectedActivity, selectedMetadata, recordStats, distanceDivisor, distanceSuffix, lapTimestampsUtc.length]);
 
   return (
     <div className="app-shell">
@@ -1080,7 +1175,7 @@ export function Dashboard({ onLogout }: Props) {
                         </div>
                       </div>
                     ) : (
-                      <div className="activity-item-wrapper" style={{ display: "flex", alignItems: "center", position: "relative" }}>
+                      <div className="activity-item-wrapper" style={{ display: "flex", alignItems: "center", position: "relative", minWidth: 0 }}>
                         {tab === "compare" && (
                           <input 
                             type="checkbox" 
@@ -1119,9 +1214,9 @@ export function Dashboard({ onLogout }: Props) {
                               <span>{formatDateShort(a.start_ts_utc)} &bull; {formatTimeShort(a.start_ts_utc)}</span>
                             </div>
                             <div className="activity-meta-row" style={{ fontWeight: 600 }}>
-                              <span style={{ color: "var(--accent)", padding: "2px 6px", background: "var(--accent-alpha, rgba(34,211,238,0.1))", borderRadius: "12px" }}>{(a.distance_m / distanceDivisor).toFixed(1)} {distanceSuffix}</span>
+                              <span className="activity-pill">{(a.distance_m / distanceDivisor).toFixed(1)} {distanceSuffix}</span>
                               <span className="spacer" />
-                              <span style={{ color: "#ec4899", padding: "2px 6px", background: "rgba(236, 72, 153, 0.1)", borderRadius: "12px" }}>{formatDuration(a.duration_s)}</span>
+                              <span className="activity-pill">{formatDuration(a.duration_s)}</span>
                             </div>
                           </div>
                         </div>
@@ -1150,12 +1245,8 @@ export function Dashboard({ onLogout }: Props) {
         <main className="main-content">
           <DonationBanner
             supporterBadge={supporterBadge}
-            donationDismissed={donationDismissed}
-            onDismiss={dismissDonationBanner}
-            onActivate={async (code: string) => {
-              const valid = await verifySupporterCode(code);
-              return valid;
-            }}
+            dismissed={bannerDismissed}
+            onDismiss={() => setBannerDismissed(true)}
           />
 
           {tab === "overview" ? (
@@ -1177,15 +1268,15 @@ export function Dashboard({ onLogout }: Props) {
                 <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDurationShort(avgDuration)}</div><div className="stat-label">Avg Duration / Activity</div></div>
                 <div className="stat-card"><div className="stat-icon"><IconDevice /></div><div className="stat-value">{filteredDevices.length}</div><div className="stat-label">Devices</div></div>
               </div>
-              <div className="panel"><h3>Activity Overview</h3><p className="panel-subtitle">Combined data from currently filtered activities</p>
-                {overviewLoading ? <div className="small" style={{ padding: "2rem 0", textAlign: "center" }}>Building overview data...</div> : <ActivityChart records={selectedRecords} theme={theme} />}
-              </div>
-              <ActivityInsights records={selectedRecords} theme={theme} />
-              <div className="summary-grid">
-                <div className="summary-card"><h4>Average Session</h4><p>{avgDistance.toFixed(2)} {distanceSuffix} per file</p></div>
-                <div className="summary-card"><h4>Average Duration</h4><p>{Math.round(avgDuration / 60)} min per file</p></div>
-                <div className="summary-card"><h4>Filtered Coverage</h4><p>{filtered.length} logs in view</p></div>
-              </div>
+              <ActivityContributionHeatmap activities={filtered} />
+              {overviewLoading ? (
+                <div className="panel">
+                  <h3>Flight Locations</h3>
+                  <div className="small" style={{ padding: "2rem 0", textAlign: "center" }}>Building GPS density map...</div>
+                </div>
+              ) : (
+                <OverviewLocationMap records={overviewRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} />
+              )}
             </>
             )
           ) : tab === "compare" ? (
@@ -1198,25 +1289,34 @@ export function Dashboard({ onLogout }: Props) {
                   <div className="detail-badges">
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
                     {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
-                    {selectedActivity.device && <span className="badge device">{selectedActivity.device}</span>}
+                    {deviceBadgeSerial && <span className="badge device">SN {deviceBadgeSerial}</span>}
                     <button className="btn-secondary" style={{ padding: "0.25rem 0.55rem", fontSize: "0.74rem" }} onClick={() => setTelemetryZoom(null)}>
                       Reset Zoom
                     </button>
                   </div>
                 </div>
                 <div className="detail-stats-strip">
-                  <div className="mini-stat"><span className="mini-icon"><IconClock /></span><span className="mini-value">{formatDuration(selectedActivity.duration_s)}</span><span className="mini-label">Duration</span></div>
-                  <div className="mini-stat"><span className="mini-icon"><IconDistance /></span><span className="mini-value">{(selectedActivity.distance_m / distanceDivisor).toFixed(2)} {distanceSuffix}</span><span className="mini-label">Distance</span></div>
-                  {recordStats.avgSpeed > 0 && <div className="mini-stat"><span className="mini-icon"><IconSpeed /></span><span className="mini-value">{recordStats.avgSpeed.toFixed(1)} km/h</span><span className="mini-label">Avg Speed</span></div>}
-                  {recordStats.maxSpeed > 0 && <div className="mini-stat"><span className="mini-icon"><IconSpeed /></span><span className="mini-value">{recordStats.maxSpeed.toFixed(1)} km/h</span><span className="mini-label">Max Speed</span></div>}
-                  {recordStats.avgHr > 0 && <div className="mini-stat"><span className="mini-icon"><IconHeart /></span><span className="mini-value">{Math.round(recordStats.avgHr)} bpm</span><span className="mini-label">Avg HR</span></div>}
-                  {recordStats.maxAlt > 0 && <div className="mini-stat"><span className="mini-icon"><IconMountain /></span><span className="mini-value">{recordStats.maxAlt.toFixed(0)} m</span><span className="mini-label">Max Altitude</span></div>}
-                  {recordStats.avgPower > 0 && <div className="mini-stat"><span className="mini-icon"><IconPower /></span><span className="mini-value">{Math.round(recordStats.avgPower)} W</span><span className="mini-label">Avg Power</span></div>}
+                  {detailStats.map((s) => (
+                    <div key={s.key} className="mini-stat">
+                      <span className="mini-icon">
+                        {s.icon === "clock" && <IconClock />}
+                        {s.icon === "distance" && <IconDistance />}
+                        {s.icon === "speed" && <IconSpeed />}
+                        {s.icon === "heart" && <IconHeart />}
+                        {s.icon === "mountain" && <IconMountain />}
+                        {s.icon === "power" && <IconPower />}
+                        {s.icon === "avg" && <IconAvg />}
+                      </span>
+                      <span className="mini-value">{s.value}</span>
+                      <span className="mini-label">{s.label}</span>
+                      {s.secondary && <span className="mini-label" style={{ fontSize: "0.68rem", marginTop: "2px" }}>{s.secondary}</span>}
+                    </div>
+                  ))}
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>Telemetry Data</h3><ActivityChart records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} /></div>
-                <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} />
+                <div className="panel"><h3>Heart Rate and Pace</h3><ActivityChart records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} /></div>
+                <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
               </div>
               <ActivityInsights records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} />
             </>

@@ -8,6 +8,7 @@ export type Activity = {
   end_ts_utc: string;
   duration_s: number;
   distance_m: number;
+  metadata_json?: string;
 };
 
 export type RecordPoint = {

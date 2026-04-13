@@ -209,6 +209,14 @@ select option {
   color-scheme: light;
 }
 
+:root[data-theme="dark"] input[type="number"] {
+  color-scheme: dark;
+}
+
+:root:not([data-theme="dark"]) input[type="number"] {
+  color-scheme: light;
+}
+
 input:focus, select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
@@ -962,6 +970,7 @@ button:focus-visible {
   padding: 0.5rem 0.6rem;
   cursor: pointer;
   border-radius: 8px;
+  min-width: 0;
 }
 
 .activity-item:hover .activity-item-content {
@@ -969,12 +978,22 @@ button:focus-visible {
 }
 
 .activity-item .activity-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   font-weight: 600;
   font-size: 0.82rem;
   line-height: 1.3;
-  white-space: nowrap;
+  white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.activity-item-wrapper {
+  min-width: 0;
 }
 
 .activity-item .activity-meta {
@@ -1069,7 +1088,7 @@ button:focus-visible {
 /* ── Main Content Area ─────────────────────────────────────────────── */
 
 .main-content {
-  padding: 1rem;
+  padding: 0 1rem 1rem;
   overflow-y: auto;
   height: 100%;
   display: flex;
@@ -1361,6 +1380,108 @@ button:focus-visible {
   background: var(--bg-surface);
 }
 
+.map-canvas-wrap {
+  position: relative;
+}
+
+.map-reset-zoom-btn {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 4;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+  backdrop-filter: blur(4px);
+}
+
+.overview-map-canvas {
+  width: 100%;
+  height: 420px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.map-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.55rem;
+}
+
+.overview-heatmap-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.overview-heatmap-wrap {
+  overflow-x: auto;
+  padding-top: 0.35rem;
+}
+
+.overview-heatmap-grid {
+  min-width: 760px;
+}
+
+.overview-heatmap-months {
+  display: grid;
+  grid-template-columns: repeat(53, 12px);
+  gap: 4px;
+  margin-left: 30px;
+  margin-bottom: 6px;
+}
+
+.overview-heatmap-month {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.overview-heatmap-body {
+  display: flex;
+  gap: 6px;
+}
+
+.overview-heatmap-daylabels {
+  width: 24px;
+  display: grid;
+  grid-template-rows: repeat(7, 12px);
+  row-gap: 4px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.overview-heatmap-daylabels span:nth-child(1) { grid-row: 2; }
+.overview-heatmap-daylabels span:nth-child(2) { grid-row: 4; }
+.overview-heatmap-daylabels span:nth-child(3) { grid-row: 6; }
+
+.overview-heatmap-weeks {
+  display: grid;
+  grid-template-columns: repeat(53, 12px);
+  gap: 4px;
+}
+
+.overview-heatmap-week {
+  display: grid;
+  grid-template-rows: repeat(7, 12px);
+  gap: 4px;
+}
+
+.overview-heatmap-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.overview-heatmap-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 0.6rem;
+}
+
 .maplibregl-ctrl-group {
   border-radius: 8px;
   overflow: hidden;
@@ -1553,26 +1674,95 @@ button:focus-visible {
 /* ── Donation Banner ───────────────────────────────────────────────── */
 
 .donation-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.65rem 0.85rem;
-  border-radius: 10px;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--accent) 8%, var(--panel-solid)),
-    color-mix(in srgb, var(--accent-2) 6%, var(--panel-solid))
-  );
-  border: 1px solid var(--border);
-  font-size: 0.85rem;
-  animation: fadeSlideIn 350ms ease both;
+  gap: 0.4rem;
+  padding: 0.38rem 2.1rem 0.38rem 0.9rem;
+  margin-bottom: 0;
+  border-radius: 0;
+  border-top: 1px solid rgba(123, 149, 196, 0.26);
+  border-bottom: 1px solid rgba(123, 149, 196, 0.2);
+  background: linear-gradient(180deg, #eef4ff 0%, #e6eefc 100%);
+  color: #1f2b44;
+  font-size: 0.94rem;
+  animation: fadeSlideIn 240ms ease both;
 }
 
-.donation-banner span {
-  display: block;
-  color: var(--text-muted);
-  font-size: 0.8rem;
+.donation-banner-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.donation-banner-text {
+  color: #2a3957;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.donation-banner-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.16rem 0.72rem;
+  border-radius: 999px;
+  background: #4e46ff;
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-decoration: none;
+  line-height: 1.1;
+}
+
+.donation-banner-link:hover {
+  filter: brightness(1.08);
+}
+
+.donation-banner-dismiss {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid rgba(35, 59, 102, 0.18);
+  background: rgba(31, 43, 68, 0.08);
+  color: #273754;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.donation-banner-dismiss:hover {
+  background: rgba(31, 43, 68, 0.16);
+}
+
+:root[data-theme="dark"] .donation-banner {
+  border-top: 1px solid rgba(168, 190, 228, 0.24);
+  border-bottom: 1px solid rgba(168, 190, 228, 0.2);
+  background: linear-gradient(180deg, #263853 0%, #223147 100%);
+  color: #e8edf7;
+}
+
+:root[data-theme="dark"] .donation-banner-text {
+  color: #eef3fb;
+}
+
+:root[data-theme="dark"] .donation-banner-dismiss {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.14);
+  color: #f3f6fd;
+}
+
+:root[data-theme="dark"] .donation-banner-dismiss:hover {
+  background: rgba(0, 0, 0, 0.24);
 }
 
 .donation-banner.supporter {
@@ -2215,6 +2405,7 @@ button:focus-visible {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
   .stat-card .stat-value { font-size: 1.2rem; }
   .map-canvas { height: 280px; }
+  .overview-map-canvas { height: 300px; }
   .donation-banner { flex-direction: column; align-items: flex-start; }
   .settings-grid { grid-template-columns: 1fr; }
   .supporter-box { flex-direction: column; align-items: flex-start; }
@@ -2232,12 +2423,16 @@ button:focus-visible {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
+  right: auto;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
   z-index: 1000;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  max-width: min(320px, calc(100vw - 24px));
+  box-sizing: border-box;
+  overflow: auto;
 }
 
 .rdp {
@@ -2264,6 +2459,14 @@ button:focus-visible {
   font-size: 0.8em;
   color: var(--text-muted);
 }
+
+.activity-pill {
+  color: var(--accent);
+  padding: 2px 6px;
+  background: var(--accent-alpha, rgba(34, 211, 238, 0.1));
+  border-radius: 12px;
+}
+
 .activity-meta-row .spacer {
   flex: 1;
 }

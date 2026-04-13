@@ -132,14 +132,6 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
         start: zoomRange?.start ?? 0,
         end: zoomRange?.end ?? 100,
       },
-      {
-        type: "slider",
-        height: 18,
-        borderColor: "transparent",
-        backgroundColor: gridLine,
-        start: zoomRange?.start ?? 0,
-        end: zoomRange?.end ?? 100,
-      },
     ],
     series: [
       {
@@ -206,14 +198,6 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
         start: zoomRange?.start ?? 0,
         end: zoomRange?.end ?? 100,
       },
-      {
-        type: "slider",
-        height: 18,
-        borderColor: "transparent",
-        backgroundColor: gridLine,
-        start: zoomRange?.start ?? 0,
-        end: zoomRange?.end ?? 100,
-      },
     ],
     series: [
       {
@@ -258,50 +242,6 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
     ],
   };
 
-  const paceOption = {
-    tooltip: { trigger: "axis", ...tooltipStyle },
-    legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
-    grid: { left: 56, right: 16, top: 32, bottom: 40 },
-    xAxis: {
-      type: "time",
-      axisLabel: { color: axisColor, fontSize: 11 },
-      axisLine: { lineStyle: { color: gridLine } },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: "value",
-      name: "min/km",
-      inverse: true,
-      nameTextStyle: { color: axisColor, fontSize: 11 },
-      axisLabel: { color: axisColor, fontSize: 11 },
-      splitLine: { lineStyle: { color: gridLine } },
-    },
-    dataZoom: [
-      {
-        type: "inside",
-        zoomOnMouseWheel: "ctrl",
-        moveOnMouseWheel: false,
-        start: zoomRange?.start ?? 0,
-        end: zoomRange?.end ?? 100,
-      },
-      {
-        type: "slider",
-        height: 18,
-        borderColor: "transparent",
-        backgroundColor: gridLine,
-        start: zoomRange?.start ?? 0,
-        end: zoomRange?.end ?? 100,
-      },
-    ],
-    series: [
-      {
-        name: "Pace", type: "line", smooth: true, showSymbol: false,
-        lineStyle: { width: 2, color: "#f43f5e" },
-        areaStyle: { color: isDark ? "rgba(244, 63, 94, 0.1)" : "rgba(244, 63, 94, 0.12)" },
-        data: timeline.map((d) => [d[0], d[3]]),
-      },
-    ],
-  };
 
   const heatOption = {
     tooltip: { position: "top", ...tooltipStyle },
@@ -349,27 +289,23 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
     <section className="insight-grid">
       <article className="panel">
         <h3>Speed + Elevation</h3>
-        <ReactECharts option={timelineOption} onEvents={zoomEvents} style={{ height: 280, width: "100%" }} />
-      </article>
-      <article className="panel">
-        <h3>Pace Trend</h3>
-        <ReactECharts option={paceOption} onEvents={zoomEvents} style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={timelineOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>Heart-Rate Zones</h3>
-        <ReactECharts option={zoneOption} style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={zoneOption} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>Cadence & Power</h3>
-        <ReactECharts option={barsOption} onEvents={zoomEvents} style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={barsOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>Effort Heatmap</h3>
-        <ReactECharts option={heatOption} style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={heatOption} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>Power vs Heart Rate</h3>
-        <ReactECharts option={scatterOption} style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={scatterOption} notMerge style={{ height: 280, width: "100%" }} />
       </article>
     </section>
   );

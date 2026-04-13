@@ -376,7 +376,7 @@ impl Database {
     pub fn list_activities(&self) -> Result<Vec<Activity>> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, file_name, activity_name, COALESCE(sport,''), COALESCE(device,''), CAST(start_ts_utc AS VARCHAR), CAST(end_ts_utc AS VARCHAR), CAST(COALESCE(duration_s,0) AS DOUBLE), CAST(COALESCE(distance_m,0) AS DOUBLE)
+            "SELECT id, file_name, activity_name, COALESCE(sport,''), COALESCE(device,''), CAST(start_ts_utc AS VARCHAR), CAST(end_ts_utc AS VARCHAR), CAST(COALESCE(duration_s,0) AS DOUBLE), CAST(COALESCE(distance_m,0) AS DOUBLE), COALESCE(metadata_json,'')
              FROM activities ORDER BY start_ts_utc DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -390,6 +390,7 @@ impl Database {
                 end_ts_utc: row.get(6)?,
                 duration_s: row.get(7)?,
                 distance_m: row.get(8)?,
+                metadata_json: row.get(9)?,
             })
         })?;
 

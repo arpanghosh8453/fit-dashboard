@@ -11,6 +11,7 @@ pub struct Activity {
     pub end_ts_utc: String,
     pub duration_s: f64,
     pub distance_m: f64,
+    pub metadata_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

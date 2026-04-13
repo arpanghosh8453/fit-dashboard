@@ -57,22 +57,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setTheme: (theme) => {
     set({ theme });
-    persist(get());
+    persist({ ...get(), theme });
   },
 
   setDistanceUnit: (distanceUnit) => {
     set({ distanceUnit });
-    persist(get());
+    persist({ ...get(), distanceUnit });
   },
 
   setTimeFormat: (timeFormat) => {
     set({ timeFormat });
-    persist(get());
+    persist({ ...get(), timeFormat });
   },
 
   setMapStyle: (mapStyle) => {
     set({ mapStyle });
-    persist(get());
+    persist({ ...get(), mapStyle });
   },
 
   loadSupporterStatus: async () => {
