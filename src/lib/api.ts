@@ -2,6 +2,20 @@ import axios from "axios";
 import { invoke } from "@tauri-apps/api/core";
 import type { Activity, OverviewStats, RecordPoint } from "../types";
 
+type StorageInfo = {
+  data_dir: string;
+  db_path: string;
+  fit_files_dir: string;
+};
+
+type SyncSummary = {
+  scanned: number;
+  imported: number;
+  duplicates: number;
+  blacklisted: number;
+  failed: number;
+};
+
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const base = (import.meta.env.VITE_API_BASE ?? "http://localhost:8080").replace(/\/$/, "");
 
@@ -108,6 +122,22 @@ export const api = {
     }
   },
 
+  async syncFitFiles(): Promise<SyncSummary> {
+    if (isTauri) {
+      return invoke<SyncSummary>("sync_fit_files");
+    }
+    const res = await webClient.post("/sync-fit-files");
+    return res.data;
+  },
+
+  async getStorageInfo(): Promise<StorageInfo> {
+    if (isTauri) {
+      return invoke<StorageInfo>("get_storage_info");
+    }
+    const res = await webClient.get("/storage-info");
+    return res.data;
+  },
+
   async listActivities(): Promise<Activity[]> {
     if (isTauri) {
       return invoke("list_activities");
@@ -146,5 +176,45 @@ export const api = {
       return invoke("delete_activity", { activityId });
     }
     await webClient.delete(`/activities/${activityId}`);
+  },
+
+  async verifySupporterCode(code: string): Promise<boolean> {
+    if (isTauri) {
+      return invoke<boolean>("verify_supporter_code", { code });
+    }
+    const res = await webClient.post("/supporter/verify", { code });
+    return res.data;
+  },
+
+  async getSupporterStatus(): Promise<boolean> {
+    if (isTauri) {
+      return invoke<boolean>("get_supporter_status");
+    }
+    const res = await webClient.get("/supporter/status");
+    return res.data;
+  },
+
+  async setSupporterStatus(active: boolean): Promise<boolean> {
+    if (isTauri) {
+      return invoke<boolean>("set_supporter_status", { active });
+    }
+    const res = await webClient.post("/supporter/status", { active });
+    return res.data;
+  },
+
+  async getDonationDismissed(): Promise<boolean> {
+    if (isTauri) {
+      return invoke<boolean>("get_donation_dismissed");
+    }
+    const res = await webClient.get("/supporter/donation");
+    return res.data;
+  },
+
+  async setDonationDismissed(dismissed: boolean): Promise<boolean> {
+    if (isTauri) {
+      return invoke<boolean>("set_donation_dismissed", { dismissed });
+    }
+    const res = await webClient.post("/supporter/donation", { dismissed });
+    return res.data;
   }
 };

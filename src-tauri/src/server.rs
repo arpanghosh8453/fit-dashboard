@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path as FsPath, sync::Arc, time::Duration};
 
 use axum::{
     extract::{DefaultBodyLimit, Multipart, Path, Query, State},
@@ -7,8 +7,9 @@ use axum::{
     routing::{get, patch, post},
     Json, Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer};
 
 use crate::{
     auth::{create_session, hash_password, verify_password},
@@ -17,10 +18,17 @@ use crate::{
     state::AppState,
 };
 
+const UNLOCK_FAILED_COUNT_KEY: &str = "auth.unlock.failed_count";
+const UNLOCK_BLOCK_UNTIL_KEY: &str = "auth.unlock.block_until_utc";
+
 #[derive(Deserialize)]
 pub struct RecordsQuery {
     pub resolution_ms: Option<i64>,
 }
+
+/// SHA-256 hash of the valid supporter code.
+const SUPPORTER_HASH: &str =
+    "20268baf2f8af1792eaf2cd864c29b3b6698b4387810f39946fbccbc350bf5c3";
 
 pub fn app(state: AppState) -> Router {
     let cors = CorsLayer::new()
@@ -34,11 +42,35 @@ pub fn app(state: AppState) -> Router {
         .route("/api/unlock", post(unlock))
         .route("/api/logout", post(logout))
         .route("/api/import-fit", post(import_fit))
+        .route("/api/sync-fit-files", post(sync_fit_files))
+        .route("/api/storage-info", get(get_storage_info))
         .route("/api/activities", get(list_activities))
         .route("/api/activities/{id}", patch(rename_activity).delete(delete_activity))
         .route("/api/overview", get(overview))
         .route("/api/records/{id}", get(records))
+        .route("/api/supporter/verify", post(verify_supporter_code))
+        .route("/api/supporter/status", get(get_supporter_status).post(set_supporter_status))
+        .route("/api/supporter/donation", get(get_donation_dismissed).post(set_donation_dismissed))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(tracing::Level::DEBUG))
+                .on_request(DefaultOnRequest::new().level(tracing::Level::DEBUG))
+                .on_response(
+                    |response: &axum::http::Response<_>, latency: Duration, _span: &tracing::Span| {
+                        let status = response.status();
+                        let latency_ms = latency.as_millis();
+
+                        if status.is_server_error() {
+                            tracing::error!(status = %status, latency_ms, "request completed with server error");
+                        } else if status.is_client_error() {
+                            tracing::warn!(status = %status, latency_ms, "request completed with client error");
+                        } else {
+                            tracing::info!(status = %status, latency_ms, "request completed");
+                        }
+                    },
+                ),
+        )
         .layer(cors)
         .with_state(Arc::new(state))
 }
@@ -55,7 +87,9 @@ async fn onboard(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<Credentials>,
 ) -> Result<Json<TokenResponse>, StatusCode> {
+    tracing::info!(username = %payload.username, "onboard attempt");
     if state.db.has_user().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)? {
+        tracing::warn!("onboard denied: user already exists");
         return Err(StatusCode::CONFLICT);
     }
 
@@ -66,6 +100,7 @@ async fn onboard(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let token = create_session(&state.db).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::info!("onboard successful and session issued");
     Ok(Json(TokenResponse { token }))
 }
 
@@ -73,6 +108,14 @@ async fn unlock(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<UnlockPayload>,
 ) -> Result<Json<TokenResponse>, StatusCode> {
+    if let Some(until) = get_unlock_block_until(&state)? {
+        if chrono::Utc::now() < until {
+            let wait_seconds = (until - chrono::Utc::now()).num_seconds().max(1);
+            tracing::warn!(wait_seconds, "unlock temporarily blocked due to repeated failures");
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
+
     let hash = state
         .db
         .get_password_hash()
@@ -81,10 +124,19 @@ async fn unlock(
 
     let ok = verify_password(&payload.password, &hash).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if !ok {
+        let blocked = register_unlock_failure(&state)?;
+        if blocked {
+            tracing::warn!("unlock failed; applied 30-second throttle window");
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+        tracing::warn!("unlock failed with invalid password");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
+    clear_unlock_throttle(&state)?;
+
     let token = create_session(&state.db).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::info!("unlock successful and session rotated");
     Ok(Json(TokenResponse { token }))
 }
 
@@ -97,6 +149,7 @@ async fn logout(
         .db
         .delete_session(&token)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::info!("logout successful; session deleted");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -105,6 +158,7 @@ async fn import_fit(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("import-fit request received");
     ensure_session(&state, &headers)
         .map_err(|s| (s, Json(serde_json::json!({ "error": "unauthorized" }))))?;
 
@@ -123,6 +177,7 @@ async fn import_fit(
         }
 
         let file_name = field.file_name().unwrap_or("activity.fit").to_string();
+        tracing::info!(file_name = %file_name, "processing FIT upload");
         let bytes = field.bytes().await.map_err(|_| {
             (
                 StatusCode::BAD_REQUEST,
@@ -136,6 +191,17 @@ async fn import_fit(
             )
         })?;
 
+        // Manual imports always clear blacklist for this hash.
+        state
+            .db
+            .remove_blacklisted_hash(&parsed.file_hash)
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "failed updating blacklist" })),
+                )
+            })?;
+
         if state
             .db
             .is_file_imported(&parsed.file_hash)
@@ -146,8 +212,18 @@ async fn import_fit(
                 )
             })?
         {
+            tracing::info!(file_name = %file_name, file_hash = %parsed.file_hash, "duplicate FIT upload skipped");
             return Ok(Json(serde_json::json!({ "status": "duplicate" })));
         }
+
+        persist_fit_file(&state, &file_name, &bytes, &parsed.file_hash)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": format!("failed storing file: {e}") })),
+                )
+            })?;
 
         let id = state
             .db
@@ -158,6 +234,7 @@ async fn import_fit(
                     Json(serde_json::json!({ "error": "failed inserting activity" })),
                 )
             })?;
+        tracing::info!(activity_id = id, file_name = %file_name, "FIT upload imported successfully");
         return Ok(Json(serde_json::json!({ "status": "ok", "activity_id": id })));
     }
 
@@ -233,6 +310,10 @@ async fn delete_activity(
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, StatusCode> {
     ensure_session(&state, &headers)?;
+    let file_hash = state
+        .db
+        .get_activity_hash(id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let changed = state
         .db
         .delete_activity(id)
@@ -240,7 +321,122 @@ async fn delete_activity(
     if !changed {
         return Err(StatusCode::NOT_FOUND);
     }
+    if let Some(hash) = file_hash {
+        state
+            .db
+            .add_blacklisted_hash(&hash)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+struct SyncSummary {
+    scanned: usize,
+    imported: usize,
+    duplicates: usize,
+    blacklisted: usize,
+    failed: usize,
+}
+
+async fn sync_fit_files(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    tracing::info!("sync-fit-files request received");
+    ensure_session(&state, &headers)?;
+
+    let mut summary = SyncSummary {
+        scanned: 0,
+        imported: 0,
+        duplicates: 0,
+        blacklisted: 0,
+        failed: 0,
+    };
+
+    let mut dir = tokio::fs::read_dir(&state.storage.fit_files_dir)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    while let Some(entry) = dir
+        .next_entry()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    {
+        let path = entry.path();
+        if !is_fit_file(&path) {
+            continue;
+        }
+
+        summary.scanned += 1;
+        let bytes = match tokio::fs::read(&path).await {
+            Ok(b) => b,
+            Err(_) => {
+                summary.failed += 1;
+                continue;
+            }
+        };
+        let hash = sha256_hex(&bytes);
+
+        match state.db.is_hash_blacklisted(&hash) {
+            Ok(true) => {
+                summary.blacklisted += 1;
+                continue;
+            }
+            Ok(false) => {}
+            Err(_) => {
+                summary.failed += 1;
+                continue;
+            }
+        }
+
+        match state.db.is_file_imported(&hash) {
+            Ok(true) => {
+                summary.duplicates += 1;
+                continue;
+            }
+            Ok(false) => {}
+            Err(_) => {
+                summary.failed += 1;
+                continue;
+            }
+        }
+
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("activity.fit")
+            .to_string();
+        match parse_fit_bytes(&file_name, &bytes)
+            .and_then(|parsed| state.db.insert_activity(parsed).map(|_| ()))
+        {
+            Ok(_) => summary.imported += 1,
+            Err(_) => summary.failed += 1,
+        }
+    }
+
+    tracing::info!(
+        scanned = summary.scanned,
+        imported = summary.imported,
+        duplicates = summary.duplicates,
+        blacklisted = summary.blacklisted,
+        failed = summary.failed,
+        "sync-fit-files completed"
+    );
+
+    Ok(Json(serde_json::json!(summary)))
+}
+
+async fn get_storage_info(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    ensure_session(&state, &headers)?;
+    Ok(Json(serde_json::json!({
+        "data_dir": state.storage.data_dir.clone(),
+        "db_path": state.storage.db_path.clone(),
+        "fit_files_dir": state.storage.fit_files_dir.clone()
+    })))
 }
 
 fn extract_session(state: &AppState, headers: &HeaderMap) -> Result<String, StatusCode> {
@@ -263,4 +459,219 @@ fn extract_session(state: &AppState, headers: &HeaderMap) -> Result<String, Stat
 
 fn ensure_session(state: &AppState, headers: &HeaderMap) -> Result<(), StatusCode> {
     extract_session(state, headers).map(|_| ())
+}
+
+// ============================================================================
+// SUPPORTER BADGE
+// ============================================================================
+
+#[derive(Deserialize)]
+struct VerifySupporterPayload {
+    code: String,
+}
+
+async fn verify_supporter_code(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<VerifySupporterPayload>,
+) -> Result<Json<bool>, StatusCode> {
+    use sha2::{Digest, Sha256};
+
+    let trimmed = payload.code.trim().to_string();
+    if trimmed.is_empty() {
+        return Ok(Json(false));
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(trimmed.as_bytes());
+    let hash_bytes = hasher.finalize();
+    let hash_hex: String = hash_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+
+    if hash_hex != SUPPORTER_HASH {
+        return Ok(Json(false));
+    }
+
+    state
+        .db
+        .set_setting("supporter_badge_active", "true")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state
+        .db
+        .set_setting("donation_dismissed", "true")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(true))
+}
+
+async fn get_supporter_status(
+    State(state): State<Arc<AppState>>,
+) -> Json<bool> {
+    let active = state
+        .db
+        .get_setting("supporter_badge_active")
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true");
+    Json(active)
+}
+
+async fn get_donation_dismissed(
+    State(state): State<Arc<AppState>>,
+) -> Json<bool> {
+    let dismissed = state
+        .db
+        .get_setting("donation_dismissed")
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true");
+    Json(dismissed)
+}
+
+#[derive(Deserialize)]
+struct DonationDismissedPayload {
+    dismissed: bool,
+}
+
+#[derive(Deserialize)]
+struct SupporterStatusPayload {
+    active: bool,
+}
+
+async fn set_supporter_status(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<SupporterStatusPayload>,
+) -> Result<Json<bool>, StatusCode> {
+    state
+        .db
+        .set_setting(
+            "supporter_badge_active",
+            if payload.active { "true" } else { "false" },
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(payload.active))
+}
+
+async fn set_donation_dismissed(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DonationDismissedPayload>,
+) -> Result<Json<bool>, StatusCode> {
+    state
+        .db
+        .set_setting(
+            "donation_dismissed",
+            if payload.dismissed { "true" } else { "false" },
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(payload.dismissed))
+}
+
+fn get_unlock_block_until(state: &AppState) -> Result<Option<chrono::DateTime<chrono::Utc>>, StatusCode> {
+    let raw = state
+        .db
+        .get_setting(UNLOCK_BLOCK_UNTIL_KEY)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let parsed = chrono::DateTime::parse_from_rfc3339(&raw)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .with_timezone(&chrono::Utc);
+    Ok(Some(parsed))
+}
+
+fn register_unlock_failure(state: &AppState) -> Result<bool, StatusCode> {
+    let prev = state
+        .db
+        .get_setting(UNLOCK_FAILED_COUNT_KEY)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let next = prev + 1;
+    state
+        .db
+        .set_setting(UNLOCK_FAILED_COUNT_KEY, &next.to_string())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if next % 5 == 0 {
+        let block_until = chrono::Utc::now() + chrono::Duration::seconds(30);
+        state
+            .db
+            .set_setting(UNLOCK_BLOCK_UNTIL_KEY, &block_until.to_rfc3339())
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn clear_unlock_throttle(state: &AppState) -> Result<(), StatusCode> {
+    state
+        .db
+        .delete_setting(UNLOCK_FAILED_COUNT_KEY)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state
+        .db
+        .delete_setting(UNLOCK_BLOCK_UNTIL_KEY)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
+}
+
+fn is_fit_file(path: &FsPath) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("fit"))
+        .unwrap_or(false)
+}
+
+async fn persist_fit_file(
+    state: &AppState,
+    original_name: &str,
+    bytes: &[u8],
+    file_hash: &str,
+) -> Result<(), anyhow::Error> {
+    let fit_dir = FsPath::new(&state.storage.fit_files_dir);
+    tokio::fs::create_dir_all(fit_dir).await?;
+
+    let sanitized = FsPath::new(original_name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("activity.fit");
+
+    let mut target = fit_dir.join(sanitized);
+    if let Ok(existing) = tokio::fs::read(&target).await {
+        let existing_hash = sha256_hex(&existing);
+        if existing_hash == file_hash {
+            return Ok(());
+        }
+
+        let stem = target
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("activity");
+        let ext = target
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("fit");
+        let suffix = &file_hash[..8.min(file_hash.len())];
+        target = fit_dir.join(format!("{stem}_{suffix}.{ext}"));
+
+        if let Ok(existing_renamed) = tokio::fs::read(&target).await {
+            let existing_hash = sha256_hex(&existing_renamed);
+            if existing_hash == file_hash {
+                return Ok(());
+            }
+        }
+    }
+
+    tokio::fs::write(target, bytes).await?;
+    Ok(())
 }

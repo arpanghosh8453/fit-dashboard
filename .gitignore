@@ -17,6 +17,7 @@ src-tauri/gen/
 
 # Logs
 *.log
+*.fit
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

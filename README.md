@@ -182,8 +182,7 @@ fit-dashboard/
 │   └── main.tsx                # React entry point
 │
 ├── docker/                      # DOCKER CONFIG
-│   ├── Dockerfile              # Backend build
-│   ├── Dockerfile.web          # Frontend build
+│   ├── Dockerfile              # Combined backend + frontend image build
 │   ├── docker-compose.yml      # Full-stack deployment
 │   └── nginx.conf              # Reverse proxy config
 │

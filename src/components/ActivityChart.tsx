@@ -7,7 +7,21 @@ type Props = {
 };
 
 export function ActivityChart({ records, theme }: Props) {
-  const seriesData = records.map((r) => [r.timestamp_ms, r.heart_rate ?? null]);
+  const t0 = records[0]?.timestamp_ms ?? 0;
+  
+  // Format MM:SS or HH:MM:SS
+  const formatRelTime = (ms: number) => {
+    const totalSec = Math.floor(Math.max(0, ms) / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    }
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const seriesData = records.map((r) => [r.timestamp_ms - t0, r.heart_rate ?? null, r.timestamp_ms]);
 
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
@@ -24,6 +38,18 @@ export function ActivityChart({ records, theme }: Props) {
       backgroundColor: tooltipBg,
       borderColor: tooltipBorder,
       textStyle: { color: tooltipText, fontSize: 12 },
+      formatter: (params: any) => {
+        const p = params[0];
+        const relTime = formatRelTime(p.value[0]);
+        const absTime = new Date(p.value[2]).toLocaleTimeString();
+        let html = `<div><strong>${relTime}</strong> <span style="color:#888;font-size:10px">(${absTime})</span></div>`;
+        for (const s of params) {
+          if (s.value[1] !== null) {
+            html += `<div>${s.marker} ${s.seriesName}: <strong>${s.value[1]}</strong></div>`;
+          }
+        }
+        return html;
+      }
     },
     legend: {
       data: ["Heart Rate"],
@@ -32,8 +58,12 @@ export function ActivityChart({ records, theme }: Props) {
     },
     grid: { left: 48, right: 16, top: 36, bottom: 46 },
     xAxis: {
-      type: "time",
-      axisLabel: { color: axisColor, fontSize: 11 },
+      type: "value",
+      axisLabel: { 
+        color: axisColor, 
+        fontSize: 11,
+        formatter: (val: number) => formatRelTime(val)
+      },
       axisLine: { lineStyle: { color: gridLine } },
       splitLine: { show: false },
     },
@@ -46,7 +76,7 @@ export function ActivityChart({ records, theme }: Props) {
     },
     dataZoom: [
       { type: "inside", zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false },
-      { type: "slider", height: 18, borderColor: "transparent", backgroundColor: gridLine },
+      { type: "slider", height: 18, borderColor: "transparent", backgroundColor: gridLine, labelFormatter: (val: number) => formatRelTime(val) },
     ],
     series: [
       {

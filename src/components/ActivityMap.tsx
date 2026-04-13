@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { RecordPoint } from "../types";
 import type { MapStyle } from "../stores/settingsStore";
+import { useSettingsStore } from "../stores/settingsStore";
 
 type Props = {
   records: RecordPoint[];
@@ -24,9 +25,14 @@ const PATH_COLOR_OPTIONS: { value: PathColorMode; label: string }[] = [
 
 type BaseMapInfo = { label: string; tileUrl: string; attribution: string };
 
-const BASEMAPS: Record<MapStyle, BaseMapInfo> = {
-  street: {
-    label: "Street",
+const BASEMAPS: Record<"light" | "dark" | "openstreet" | "topo" | "satellite", BaseMapInfo> = {
+  light: {
+    label: "Light",
+    tileUrl: "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    attribution: "\u00a9 OpenStreetMap contributors \u00a9 CARTO"
+  },
+  openstreet: {
+    label: "OpenStreet",
     tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     attribution: "\u00a9 OpenStreetMap contributors"
   },
@@ -47,8 +53,9 @@ const BASEMAPS: Record<MapStyle, BaseMapInfo> = {
   }
 };
 
-function styleFromMap(ms: MapStyle): StyleSpecification {
-  const s = BASEMAPS[ms];
+function styleFromMap(ms: MapStyle, theme: "light" | "dark"): StyleSpecification {
+  const actualStyle = ms === "default" ? theme : ms;
+  const s = BASEMAPS[actualStyle as keyof typeof BASEMAPS];
   return {
     version: 8,
     sources: { basemap: { type: "raster", tiles: [s.tileUrl], tileSize: 256, attribution: s.attribution } },
@@ -91,19 +98,32 @@ function buildColoredGeoJson(
     return { type: "FeatureCollection", features: [] };
   }
 
+  // Use a single continuous LineString for solid paths to avoid
+  // segment overlapping artifacts (disconnections/beading).
+  if (mode === "solid") {
+    return {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: coords },
+          properties: { color: "#f0c24a" }
+        }
+      ]
+    };
+  }
+
   let values: number[] | null = null;
   let min = 0, max = 1, range = 1;
 
-  if (mode !== "solid") {
-    values = getMetricValues(gpsRecs, mode);
-    min = Infinity; max = -Infinity;
-    for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
-    range = (max - min) || 1;
-  }
+  values = getMetricValues(gpsRecs, mode);
+  min = Infinity; max = -Infinity;
+  for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
+  range = (max - min) || 1;
 
   const features: GeoJSON.Feature<GeoJSON.Geometry>[] = [];
   for (let i = 0; i < coords.length - 1; i++) {
-    const color = mode === "solid" ? "#22d3ee" : valueToColor((values![i] - min) / range);
+    const color = valueToColor((values![i] - min) / range);
     const r = gpsRecs[i];
     features.push({
       type: "Feature",
@@ -146,11 +166,13 @@ function buildTooltipHtml(props: Record<string, any>): string {
 
 const SOURCE_ID = "activity-route";
 const LAYER_ID = "activity-route-layer";
+const HIT_LAYER_ID = "activity-route-hit";
 
 export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const theme = useSettingsStore((s) => s.theme);
 
   const [pathColorMode, setPathColorMode] = useState<PathColorMode>("solid");
   const pathColorModeRef = useRef(pathColorMode);
@@ -182,6 +204,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
     const mode = pathColorModeRef.current;
 
     if (!coords.length) {
+      if (map.getLayer(HIT_LAYER_ID)) map.removeLayer(HIT_LAYER_ID);
       if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID);
       if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
       return;
@@ -205,11 +228,26 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
         paint: {
           "line-width": 4,
           "line-color": ["get", "color"] as any,
-          "line-opacity": 0.9
+          "line-opacity": 1.0
         }
       });
     } else {
       map.setPaintProperty(LAYER_ID, "line-color", ["get", "color"]);
+    }
+
+    // Invisible wider hit-area layer for easier hover detection
+    if (!map.getLayer(HIT_LAYER_ID)) {
+      map.addLayer({
+        id: HIT_LAYER_ID,
+        type: "line",
+        source: SOURCE_ID,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-width": 20,
+          "line-color": "rgba(0,0,0,0)",
+          "line-opacity": 0
+        }
+      });
     }
 
     if (fitToRoute) {
@@ -228,13 +266,16 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleFromMap(mapStyle),
+      style: styleFromMap(mapStyle, theme),
       center: [0, 0],
       zoom: 2,
-      attributionControl: true,
       cooperativeGestures: true,
     });
     mapRef.current = map;
+
+    map.on("load", () => {
+      drawRoute(map, true);
+    });
 
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 
@@ -242,14 +283,14 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
     const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: "220px" });
     popupRef.current = popup;
 
-    map.on("mousemove", LAYER_ID, (e) => {
+    map.on("mousemove", HIT_LAYER_ID, (e) => {
       if (!e.features?.[0]) return;
       map.getCanvas().style.cursor = "crosshair";
       const props = e.features[0].properties as Record<string, any>;
       popup.setLngLat(e.lngLat).setHTML(buildTooltipHtml(props)).addTo(map);
     });
 
-    map.on("mouseleave", LAYER_ID, () => {
+    map.on("mouseleave", HIT_LAYER_ID, () => {
       map.getCanvas().style.cursor = "";
       popup.remove();
     });
@@ -259,28 +300,52 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
       map.remove();
       mapRef.current = null;
     };
-  }, [mapStyle]);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.setStyle(styleFromMap(mapStyle));
-    map.once("style.load", () => { drawRoute(map, true); });
-  }, [mapStyle]);
+
+    // setStyle() destroys existing sources/layers AND may clear pending
+    // event listeners. We must call setStyle first, then wait for the
+    // map to become idle (all tiles loaded, no pending work) before
+    // re-adding our route overlay.
+    map.setStyle(styleFromMap(mapStyle, theme));
+
+    const onIdle = () => {
+      map.off("idle", onIdle);
+      drawRoute(map, false);
+    };
+    map.on("idle", onIdle);
+
+    return () => {
+      map.off("idle", onIdle);
+    };
+  }, [mapStyle, theme]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (map.isStyleLoaded()) drawRoute(map, true);
-    else map.once("style.load", () => { drawRoute(map, true); });
+    if (map.isStyleLoaded()) {
+      drawRoute(map, true);
+    } else {
+      const onIdle = () => { map.off("idle", onIdle); drawRoute(map, true); };
+      map.on("idle", onIdle);
+      return () => { map.off("idle", onIdle); };
+    }
   }, [coordinates]);
 
   // Redraw when color mode changes (don't re-fit)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (map.isStyleLoaded()) drawRoute(map, false);
-    else map.once("style.load", () => { drawRoute(map, false); });
+    if (map.isStyleLoaded()) {
+      drawRoute(map, false);
+    } else {
+      const onIdle = () => { map.off("idle", onIdle); drawRoute(map, false); };
+      map.on("idle", onIdle);
+      return () => { map.off("idle", onIdle); };
+    }
   }, [pathColorMode]);
 
   return (

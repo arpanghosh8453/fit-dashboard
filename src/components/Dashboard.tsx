@@ -2,7 +2,10 @@ import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useActivityStore } from "../stores/activityStore";
 import { ActivityChart } from "./ActivityChart";
 import { ActivityMap } from "./ActivityMap";
+import { CompareCharts } from "./CompareCharts";
 import { ActivityInsights } from "./ActivityInsights";
+import { DatePickerPopover } from "./DatePickerPopover";
+import { DateRange } from "react-day-picker";
 import { DonationBanner } from "./DonationBanner";
 import { SettingsPanel } from "./SettingsPanel";
 import { api } from "../lib/api";
@@ -156,7 +159,8 @@ function IconClipboard() {
 /* ── Dashboard Component ─────────────────────────────────────────── */
 
 export function Dashboard({ onLogout }: Props) {
-  const [tab, setTab] = useState<"overview" | "individual">("overview");
+  const [tab, setTab] = useState<"overview" | "individual" | "compare">("overview");
+  const [compareIds, setCompareIds] = useState<number[]>([]);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
@@ -174,9 +178,14 @@ export function Dashboard({ onLogout }: Props) {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [minDurationHours, setMinDurationHours] = useState("");
   const [maxDurationHours, setMaxDurationHours] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState<Date | undefined>();
+  const [dateTo, setDateTo] = useState<Date | undefined>();
+  const [datePickerFromOpen, setDatePickerFromOpen] = useState(false);
+  const [datePickerToOpen, setDatePickerToOpen] = useState(false);
+  const dateFromBtnRef = useRef<HTMLButtonElement>(null);
+  const dateToBtnRef = useRef<HTMLButtonElement>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [overviewRecords, setOverviewRecords] = useState<RecordPoint[]>([]);
   const [overviewLoading, setOverviewLoading] = useState(false);
@@ -194,9 +203,9 @@ export function Dashboard({ onLogout }: Props) {
     filterSport, setFilterSport, selectActivity, refresh
   } = useActivityStore();
   const {
-    distanceUnit, dateFormat, timeFormat, supporterBadge,
+    distanceUnit, dateFormat, timeFormat, supporterBadge, donationDismissed,
     toggleSettings, setTheme, mapStyle, setMapStyle,
-    buySupporterBadge, theme,
+    verifySupporterCode, dismissDonationBanner, loadSupporterStatus, theme,
   } = useSettingsStore();
 
   useEffect(() => {
@@ -206,22 +215,8 @@ export function Dashboard({ onLogout }: Props) {
   }, []);
 
   useEffect(() => {
-    if (tab !== "overview" || activities.length === 0) return;
-    let cancelled = false;
-    async function loadOverviewRecords() {
-      setOverviewLoading(true);
-      try {
-        const sample = activities.slice(0, 40);
-        const chunks = await Promise.all(sample.map((a) => api.getRecords(a.id, 45_000).catch(() => [])));
-        const merged = chunks.flat().sort((a, b) => a.timestamp_ms - b.timestamp_ms);
-        if (!cancelled) setOverviewRecords(merged);
-      } finally {
-        if (!cancelled) setOverviewLoading(false);
-      }
-    }
-    void loadOverviewRecords();
-    return () => { cancelled = true; };
-  }, [tab, activities]);
+    void loadSupporterStatus();
+  }, []);
 
   function parseUtcDate(input: string): Date {
     const trimmed = input.trim();
@@ -233,8 +228,8 @@ export function Dashboard({ onLogout }: Props) {
   const filtered = useMemo(() => {
     const minSec = minDurationHours ? Number(minDurationHours) * 3600 : null;
     const maxSec = maxDurationHours ? Number(maxDurationHours) * 3600 : null;
-    const fromTs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
-    const toTs = dateTo ? new Date(`${dateTo}T23:59:59`).getTime() : null;
+    const fromTs = dateFrom ? dateFrom.getTime() : null;
+    const toTs = dateTo ? (dateTo.getTime() + 86399999) : null;
 
     return activities.filter((a) => {
       if (searchQuery.trim()) {
@@ -253,15 +248,40 @@ export function Dashboard({ onLogout }: Props) {
     });
   }, [activities, filterSport, minDurationHours, maxDurationHours, dateFrom, dateTo, searchQuery]);
 
+  useEffect(() => {
+    if (tab !== "overview") return;
+    let cancelled = false;
+    async function loadOverviewRecords() {
+      setOverviewLoading(true);
+      try {
+        if (filtered.length === 0) {
+          if (!cancelled) setOverviewRecords([]);
+          return;
+        }
+        const sample = filtered.slice(0, 40);
+        const chunks = await Promise.all(sample.map((a) => api.getRecords(a.id, 45_000).catch(() => [])));
+        const merged = chunks.flat().sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+        if (!cancelled) setOverviewRecords(merged);
+      } finally {
+        if (!cancelled) setOverviewLoading(false);
+      }
+    }
+    void loadOverviewRecords();
+    return () => { cancelled = true; };
+  }, [tab, filtered]);
+
   const sports = Array.from(new Set(activities.map((a) => a.sport).filter(Boolean)));
-  const devices = Array.from(new Set(activities.map((a) => a.device).filter(Boolean)));
+  const filteredSports = Array.from(new Set(filtered.map((a) => a.sport).filter(Boolean)));
+  const filteredDevices = Array.from(new Set(filtered.map((a) => a.device).filter(Boolean)));
   const selectedRecords = tab === "overview" ? overviewRecords : records;
   const distanceDivisor = distanceUnit === "km" ? 1000 : 1609.344;
   const distanceSuffix = distanceUnit;
-  const totalDistance = (overview?.total_distance_m ?? 0) / distanceDivisor;
-  const totalDuration = overview?.total_duration_s ?? 0;
-  const avgDistance = activities.length ? totalDistance / activities.length : 0;
-  const avgDuration = activities.length ? totalDuration / activities.length : 0;
+  const filteredTotalDistanceM = filtered.reduce((sum, a) => sum + a.distance_m, 0);
+  const filteredTotalDurationS = filtered.reduce((sum, a) => sum + a.duration_s, 0);
+  const totalDistance = filteredTotalDistanceM / distanceDivisor;
+  const totalDuration = filteredTotalDurationS;
+  const avgDistance = filtered.length ? totalDistance / filtered.length : 0;
+  const avgDuration = filtered.length ? totalDuration / filtered.length : 0;
   const recordStats = useMemo(() => computeRecordStats(records), [records]);
 
   function formatDate(input: string): string {
@@ -283,6 +303,12 @@ export function Dashboard({ onLogout }: Props) {
     return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
   }
 
+  function formatTimeShort(input: string): string {
+    const date = parseUtcDate(input);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: timeFormat === "12h" });
+  }
+
   async function importBatch(fileList: FileList | null) {
     if (!fileList || fileList.length === 0 || isImporting) return;
     const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith(".fit"));
@@ -292,16 +318,47 @@ export function Dashboard({ onLogout }: Props) {
     for (let i = 0; i < files.length; i++) {
       setImportMessage(`Processing ${i + 1}/${files.length}: ${files[i].name}`);
       try {
-        const result = await api.importFit(files[i]);
+        const result: any = await api.importFit(files[i]);
         if (result?.status === "duplicate") duplicates++; else imported++;
       } catch (err) {
         failed++;
         setImportMessage(`Failed on ${files[i].name}: ${err instanceof Error ? err.message : "unknown"}`);
       }
     }
-    await refresh();
+    let refreshError: string | null = null;
+    try {
+      await refresh();
+    } catch (err) {
+      refreshError = err instanceof Error ? err.message : "unknown";
+    }
     setIsImporting(false);
-    setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}.`);
+    if (refreshError) {
+      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}. Refresh failed: ${refreshError}`);
+    } else {
+      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}.`);
+    }
+  }
+
+  async function syncFromStorage() {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    setImportMessage("Sync in progress...");
+    try {
+      const result = await api.syncFitFiles();
+      try {
+        await refresh();
+      } catch (err) {
+        setImportMessage(`Sync finished, but refresh failed: ${err instanceof Error ? err.message : "unknown"}`);
+        return;
+      }
+      setImportMessage(
+        `Sync complete: scanned ${result.scanned}, imported ${result.imported}, duplicates ${result.duplicates}, blacklisted ${result.blacklisted}, failed ${result.failed}.`
+      );
+    } catch (err) {
+      setImportMessage(`Sync failed: ${err instanceof Error ? err.message : "unknown"}`);
+    } finally {
+      setIsSyncing(false);
+    }
   }
 
   /* ── Inline rename/delete ────────────────────────────────────────── */
@@ -331,7 +388,11 @@ export function Dashboard({ onLogout }: Props) {
     if (deleteTarget === null) return;
     await api.deleteActivity(deleteTarget);
     if (selectedActivity?.id === deleteTarget) await selectActivity(null);
-    await refresh();
+    try {
+      await refresh();
+    } catch {
+      // Keep UI responsive even if backend is briefly unavailable.
+    }
     setDeleteTarget(null);
   }
 
@@ -399,7 +460,7 @@ export function Dashboard({ onLogout }: Props) {
   }
 
   function clearFilters() {
-    setDateFrom(""); setDateTo("");
+    setDateFrom(undefined); setDateTo(undefined);
     setMinDurationHours(""); setMaxDurationHours("");
     setFilterSport("all"); setSearchQuery("");
   }
@@ -417,7 +478,10 @@ export function Dashboard({ onLogout }: Props) {
           <div className="brand">
             <div className="brand-icon">F</div>
             <div className="brand-text">
-              <h1>FIT Dashboard</h1>
+              <h1>
+                FIT Dashboard
+                {supporterBadge && <span className="supporter-badge-inline" title="Supporter Badge Active">Supporter</span>}
+              </h1>
               <span>Performance Suite</span>
             </div>
           </div>
@@ -426,13 +490,10 @@ export function Dashboard({ onLogout }: Props) {
           <div className="view-toggle">
             <button id="tab-overview" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button>
             <button id="tab-individual" className={tab === "individual" ? "active" : ""} onClick={() => setTab("individual")}>Individual</button>
+            <button id="tab-compare" className={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>Compare</button>
           </div>
         </div>
         <div className="header-right">
-          <div className="header-search">
-            <span className="search-icon"><IconSearch /></span>
-            <input id="header-search-input" placeholder="Search activities..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-          </div>
           <button className="icon-btn" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="Toggle theme" title={theme === "light" ? "Dark mode" : "Light mode"}>
             {theme === "light" ? <IconMoon /> : <IconSun />}
           </button>
@@ -467,7 +528,13 @@ export function Dashboard({ onLogout }: Props) {
 
             {/* Import */}
             <section className="sidebar-section">
-              <button className={`section-header ${isImportOpen ? "open" : ""}`} onClick={() => setIsImportOpen((v) => !v)}>
+              <button className={`section-header ${isImportOpen ? "open" : ""}`} onClick={() => {
+                setIsImportOpen((v) => {
+                  const next = !v;
+                  if (next) setIsFilterOpen(false);
+                  return next;
+                });
+              }}>
                 <span>Import FIT Files</span>
                 <span className="chevron"><IconChevron /></span>
               </button>
@@ -475,9 +542,14 @@ export function Dashboard({ onLogout }: Props) {
                 <div className="section-body">
                   <div className="import-zone">
                     <input ref={fileInputRef} type="file" accept=".fit,.FIT" multiple hidden onChange={(e) => { void importBatch(e.target.files); e.currentTarget.value = ""; }} />
-                    <button className="import-btn" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
-                      {isImporting ? "Importing..." : "Select FIT files"}
-                    </button>
+                    <div className="import-actions">
+                      <button className="import-btn" onClick={() => fileInputRef.current?.click()} disabled={isImporting || isSyncing}>
+                        {isImporting ? "Importing..." : "Select FIT files"}
+                      </button>
+                      <button className="btn-secondary import-sync-btn" onClick={() => void syncFromStorage()} disabled={isImporting || isSyncing}>
+                        <IconRefresh /> {isSyncing ? "Syncing..." : "Sync"}
+                      </button>
+                    </div>
                     <span className="import-hint">Batch queue runs sequentially for stability.</span>
                   </div>
                 </div>
@@ -486,7 +558,13 @@ export function Dashboard({ onLogout }: Props) {
 
             {/* Filters */}
             <section className="sidebar-section">
-              <button className={`section-header ${isFilterOpen ? "open" : ""}`} onClick={() => setIsFilterOpen((v) => !v)}>
+              <button className={`section-header ${isFilterOpen ? "open" : ""}`} onClick={() => {
+                setIsFilterOpen((v) => {
+                  const next = !v;
+                  if (next) setIsImportOpen(false);
+                  return next;
+                });
+              }}>
                 <span>Filters</span>
                 <span className="chevron"><IconChevron /></span>
               </button>
@@ -497,10 +575,55 @@ export function Dashboard({ onLogout }: Props) {
                       <option value="all">All Sports</option>
                       {sports.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select></label>
-                    <label>Date From<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></label>
-                    <label>Date To<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></label>
-                    <label>Min Duration (hours)<input type="number" min="0" step="0.25" placeholder="Any" value={minDurationHours} onChange={(e) => setMinDurationHours(e.target.value)} /></label>
-                    <label>Max Duration (hours)<input type="number" min="0" step="0.25" placeholder="Any" value={maxDurationHours} onChange={(e) => setMaxDurationHours(e.target.value)} /></label>
+                    <label>
+                      Date Range
+                      <div className="filter-date-wrapper" style={{ display: "flex", gap: "8px" }}>
+                        <div style={{ flex: 1, position: "relative" }}>
+                          <button
+                            className="btn-outline-secondary"
+                            type="button"
+                            ref={dateFromBtnRef}
+                            style={{ width: "100%", justifyContent: "flex-start", textAlign: "left", fontWeight: "normal" }}
+                            onClick={() => setDatePickerFromOpen(!datePickerFromOpen)}
+                          >
+                            {dateFrom ? formatDateShort(dateFrom.toISOString()) : "Start"}
+                          </button>
+                          <DatePickerPopover
+                            isOpen={datePickerFromOpen}
+                            onClose={() => setDatePickerFromOpen(false)}
+                            selected={dateFrom}
+                            onSelect={setDateFrom}
+                            anchorRef={dateFromBtnRef}
+                          />
+                        </div>
+                        <div style={{ flex: 1, position: "relative" }}>
+                          <button
+                            className="btn-outline-secondary"
+                            type="button"
+                            ref={dateToBtnRef}
+                            style={{ width: "100%", justifyContent: "flex-start", textAlign: "left", fontWeight: "normal" }}
+                            onClick={() => setDatePickerToOpen(!datePickerToOpen)}
+                          >
+                            {dateTo ? formatDateShort(dateTo.toISOString()) : "End"}
+                          </button>
+                          <DatePickerPopover
+                            isOpen={datePickerToOpen}
+                            onClose={() => setDatePickerToOpen(false)}
+                            selected={dateTo}
+                            onSelect={setDateTo}
+                            anchorRef={dateToBtnRef}
+                          />
+                        </div>
+                      </div>
+                    </label>
+                    <label>
+                      Duration (hours)
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                        <input style={{ minWidth: 0 }} type="number" min="0" step="0.25" placeholder="Min" value={minDurationHours} onChange={(e) => setMinDurationHours(e.target.value)} />
+                        <span style={{ color: "var(--text-muted)" }}>—</span>
+                        <input style={{ minWidth: 0 }} type="number" min="0" step="0.25" placeholder="Max" value={maxDurationHours} onChange={(e) => setMaxDurationHours(e.target.value)} />
+                      </div>
+                    </label>
                     <div className="filter-actions"><button className="btn-secondary" style={{ flex: 1 }} onClick={clearFilters}>Reset</button></div>
                   </div>
                 </div>
@@ -547,13 +670,14 @@ export function Dashboard({ onLogout }: Props) {
             </div>
 
             {/* Activity List */}
-            <div className="activity-list">
-              {filtered.map((a) => {
+            <div className="activity-list-box">
+              <div className="activity-list">
+                {filtered.map((a) => {
                 const isRenaming = renameTarget?.id === a.id;
                 const isDeleting = deleteTarget === a.id;
                 const isActive = selectedActivity?.id === a.id;
 
-                return (
+                  return (
                   <div key={a.id} className={`activity-item ${isActive ? "active" : ""}`}>
                     {isRenaming ? (
                       <div className="inline-rename">
@@ -580,33 +704,63 @@ export function Dashboard({ onLogout }: Props) {
                         </div>
                       </div>
                     ) : (
-                      <div
-                        className="activity-item-content"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => { void selectActivity(a); setTab("individual"); }}
-                        onContextMenu={(e) => onItemContextMenu(e, a)}
-                      >
-                        <span className="activity-name">{a.activity_name || a.file_name}</span>
-                        <span className="activity-meta">
-                          <span>{formatDateShort(a.start_ts_utc)}</span>
-                          <span className="dot" />
-                          <span>{formatDurationShort(a.duration_s)}</span>
-                          <span className="dot" />
-                          <span>{a.sport || "unknown"}</span>
-                        </span>
-                        <span className="activity-distance">{(a.distance_m / distanceDivisor).toFixed(1)} {distanceSuffix}</span>
+                      <div className="activity-item-wrapper" style={{ display: "flex", alignItems: "center", position: "relative" }}>
+                        {tab === "compare" && (
+                          <input 
+                            type="checkbox" 
+                            checked={compareIds.includes(a.id)}
+                            onChange={(e) => {
+                               if (e.target.checked && compareIds.length < 4) {
+                                  setCompareIds([...compareIds, a.id]);
+                               } else if (!e.target.checked) {
+                                  setCompareIds(compareIds.filter(id => id !== a.id));
+                               }
+                            }}
+                            disabled={!compareIds.includes(a.id) && compareIds.length >= 4}
+                            style={{ margin: "0 0 0 12px", cursor: "pointer", width: "18px", height: "18px", accentColor: "var(--accent)" }}
+                          />
+                        )}
+                        <div
+                          className="activity-item-content"
+                          role="button"
+                          tabIndex={0}
+                          style={{ flex: 1, paddingLeft: tab === "compare" ? "8px" : "" }}
+                          onClick={() => {
+                            if (tab === "compare") {
+                              const checked = compareIds.includes(a.id);
+                              if (!checked && compareIds.length < 4) setCompareIds([...compareIds, a.id]);
+                              else if (checked) setCompareIds(compareIds.filter(id => id !== a.id));
+                            } else {
+                              void selectActivity(a); 
+                              setTab("individual"); 
+                            }
+                          }}
+                          onContextMenu={(e) => onItemContextMenu(e, a)}
+                        >
+                          <span className="activity-name">{a.activity_name || a.file_name}</span>
+                          <div className="activity-meta-rows">
+                            <div className="activity-meta-row" style={{ color: "var(--text-muted)", marginBottom: "4px" }}>
+                              <span>{formatDateShort(a.start_ts_utc)} &bull; {formatTimeShort(a.start_ts_utc)}</span>
+                            </div>
+                            <div className="activity-meta-row" style={{ fontWeight: 600 }}>
+                              <span style={{ color: "var(--accent)", padding: "2px 6px", background: "var(--accent-alpha, rgba(34,211,238,0.1))", borderRadius: "12px" }}>{(a.distance_m / distanceDivisor).toFixed(1)} {distanceSuffix}</span>
+                              <span className="spacer" />
+                              <span style={{ color: "#ec4899", padding: "2px 6px", background: "rgba(236, 72, 153, 0.1)", borderRadius: "12px" }}>{formatDuration(a.duration_s)}</span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
-                );
-              })}
-              {filtered.length === 0 && (
-                <div className="empty-state" style={{ minHeight: 120, border: "none", padding: "1rem" }}>
-                  <span className="empty-icon"><IconClipboard /></span>
-                  <span>No activities match filters</span>
-                </div>
-              )}
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <div className="empty-state" style={{ minHeight: 120, border: "none", padding: "1rem" }}>
+                    <span className="empty-icon"><IconClipboard /></span>
+                    <span>No activities match filters</span>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="sidebar-footer">
@@ -618,31 +772,48 @@ export function Dashboard({ onLogout }: Props) {
 
         {/* ── Main Content ───────────────────────────────────── */}
         <main className="main-content">
-          <DonationBanner supporterBadge={supporterBadge} onBuyBadge={buySupporterBadge} />
+          <DonationBanner
+            supporterBadge={supporterBadge}
+            donationDismissed={donationDismissed}
+            onDismiss={dismissDonationBanner}
+            onActivate={async (code: string) => {
+              const valid = await verifySupporterCode(code);
+              return valid;
+            }}
+          />
 
           {tab === "overview" ? (
+            activities.length === 0 ? (
+              <div className="empty-state">
+                <span className="empty-icon"><IconBarChart size={40} /></span>
+                <span>Import logs to see overview.</span>
+              </div>
+            ) : (
             <>
               <div className="stats-row">
-                <div className="stat-card"><div className="stat-icon"><IconActivity /></div><div className="stat-value">{overview?.activity_count ?? 0}</div><div className="stat-label">Total Activities</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconActivity /></div><div className="stat-value">{filtered.length}</div><div className="stat-label">Filtered Activities</div></div>
                 <div className="stat-card"><div className="stat-icon"><IconDistance /></div><div className="stat-value">{totalDistance.toFixed(1)} <small>{distanceSuffix}</small></div><div className="stat-label">Total Distance</div></div>
                 <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDuration(totalDuration)}</div><div className="stat-label">Total Duration</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconSport /></div><div className="stat-value">{sports.length}</div><div className="stat-label">Unique Sports</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconSport /></div><div className="stat-value">{filteredSports.length}</div><div className="stat-label">Unique Sports</div></div>
               </div>
               <div className="stats-row">
                 <div className="stat-card"><div className="stat-icon"><IconAvg /></div><div className="stat-value">{avgDistance.toFixed(1)} <small>{distanceSuffix}</small></div><div className="stat-label">Avg Distance / Activity</div></div>
                 <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDurationShort(avgDuration)}</div><div className="stat-label">Avg Duration / Activity</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconDevice /></div><div className="stat-value">{devices.length}</div><div className="stat-label">Devices</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconDevice /></div><div className="stat-value">{filteredDevices.length}</div><div className="stat-label">Devices</div></div>
               </div>
-              <div className="panel"><h3>Activity Overview</h3><p className="panel-subtitle">All imported FIT data combined</p>
+              <div className="panel"><h3>Activity Overview</h3><p className="panel-subtitle">Combined data from currently filtered activities</p>
                 {overviewLoading ? <div className="small" style={{ padding: "2rem 0", textAlign: "center" }}>Building overview data...</div> : <ActivityChart records={selectedRecords} theme={theme} />}
               </div>
               <ActivityInsights records={selectedRecords} theme={theme} />
               <div className="summary-grid">
                 <div className="summary-card"><h4>Average Session</h4><p>{avgDistance.toFixed(2)} {distanceSuffix} per file</p></div>
                 <div className="summary-card"><h4>Average Duration</h4><p>{Math.round(avgDuration / 60)} min per file</p></div>
-                <div className="summary-card"><h4>Import Coverage</h4><p>{activities.length} logs available</p></div>
+                <div className="summary-card"><h4>Filtered Coverage</h4><p>{filtered.length} logs in view</p></div>
               </div>
             </>
+            )
+          ) : tab === "compare" ? (
+            <CompareCharts compareIds={compareIds} activities={activities} theme={theme} />
           ) : selectedActivity ? (
             <>
               <div className="detail-header">

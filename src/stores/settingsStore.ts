@@ -1,10 +1,11 @@
 import { create } from "zustand";
+import { api } from "../lib/api";
 
 type Theme = "light" | "dark";
 type DistanceUnit = "km" | "mi";
 type DateFormat = "locale" | "iso";
 type TimeFormat = "12h" | "24h";
-export type MapStyle = "street" | "topo" | "satellite" | "dark";
+export type MapStyle = "default" | "openstreet" | "topo" | "satellite";
 
 type SettingsState = {
   theme: Theme;
@@ -13,6 +14,7 @@ type SettingsState = {
   timeFormat: TimeFormat;
   mapStyle: MapStyle;
   supporterBadge: boolean;
+  donationDismissed: boolean;
   showSettings: boolean;
   hydrate: () => void;
   toggleSettings: () => void;
@@ -21,7 +23,10 @@ type SettingsState = {
   setDateFormat: (format: DateFormat) => void;
   setTimeFormat: (format: TimeFormat) => void;
   setMapStyle: (style: MapStyle) => void;
-  buySupporterBadge: () => void;
+  loadSupporterStatus: () => Promise<void>;
+  verifySupporterCode: (code: string) => Promise<boolean>;
+  removeSupporterBadge: () => Promise<void>;
+  dismissDonationBanner: () => void;
 };
 
 const STORAGE_KEY = "fitDashboard.settings";
@@ -31,8 +36,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   distanceUnit: "km",
   dateFormat: "locale",
   timeFormat: "24h",
-  mapStyle: "street",
+  mapStyle: "default",
   supporterBadge: false,
+  donationDismissed: false,
   showSettings: false,
 
   hydrate: () => {
@@ -45,8 +51,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         distanceUnit: parsed.distanceUnit ?? "km",
         dateFormat: parsed.dateFormat ?? "locale",
         timeFormat: parsed.timeFormat ?? "24h",
-        mapStyle: parsed.mapStyle ?? "street",
-        supporterBadge: Boolean(parsed.supporterBadge)
+        mapStyle: parsed.mapStyle ?? "default",
       });
     } catch {
       // Ignore invalid persisted data.
@@ -80,10 +85,49 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persist(get());
   },
 
-  buySupporterBadge: () => {
-    set({ supporterBadge: true });
-    persist(get());
-  }
+  loadSupporterStatus: async () => {
+    try {
+      const [badgeActive, dismissed] = await Promise.all([
+        api.getSupporterStatus(),
+        api.getDonationDismissed(),
+      ]);
+      set({ supporterBadge: badgeActive, donationDismissed: dismissed });
+    } catch (err) {
+      console.warn("Failed to load supporter status from backend:", err);
+    }
+  },
+
+  verifySupporterCode: async (code: string) => {
+    try {
+      const valid = await api.verifySupporterCode(code);
+      if (valid) {
+        set({ supporterBadge: true, donationDismissed: true });
+      }
+      return valid;
+    } catch (err) {
+      console.error("Failed to verify supporter code:", err);
+      return false;
+    }
+  },
+
+  removeSupporterBadge: async () => {
+    try {
+      await Promise.all([
+        api.setSupporterStatus(false),
+        api.setDonationDismissed(false),
+      ]);
+      set({ supporterBadge: false, donationDismissed: false });
+    } catch (err) {
+      console.error("Failed to remove supporter badge:", err);
+    }
+  },
+
+  dismissDonationBanner: () => {
+    set({ donationDismissed: true });
+    api.setDonationDismissed(true).catch((err) =>
+      console.warn("Failed to persist donation dismissed state:", err)
+    );
+  },
 }));
 
 function persist(state: SettingsState) {
@@ -95,7 +139,6 @@ function persist(state: SettingsState) {
       dateFormat: state.dateFormat,
       timeFormat: state.timeFormat,
       mapStyle: state.mapStyle,
-      supporterBadge: state.supporterBadge
     })
   );
 }

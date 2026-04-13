@@ -165,9 +165,43 @@ pub fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> 
     })
     .to_string();
 
+    let activity_name;
+    let mut display_sport = sport.clone();
+    if let Some(first) = display_sport.chars().next() {
+        display_sport = first.to_uppercase().collect::<String>() + &display_sport[first.len_utf8()..];
+    }
+    if display_sport.is_empty() {
+        display_sport = "Activity".to_string();
+    }
+
+    if let Some(pos) = points.iter().find(|p| p.latitude.is_some() && p.longitude.is_some()) {
+        let lat = pos.latitude.unwrap();
+        let lon = pos.longitude.unwrap();
+        let geocoder = reverse_geocoder::ReverseGeocoder::new();
+        let result = geocoder.search((lat, lon));
+        let record = result.record;
+        
+        let mut loc_parts = Vec::new();
+        if !record.name.is_empty() {
+            loc_parts.push(record.name.as_str());
+        }
+        if !record.admin1.is_empty() {
+            loc_parts.push(record.admin1.as_str());
+        }
+        let loc_str = loc_parts.join(", ");
+        
+        if loc_str.is_empty() {
+            activity_name = file_name.trim_end_matches(".fit").to_string();
+        } else {
+            activity_name = format!("{} — {}", loc_str, display_sport);
+        }
+    } else {
+        activity_name = file_name.trim_end_matches(".fit").to_string();
+    }
+
     Ok(ParsedActivity {
         file_name: file_name.to_string(),
-        activity_name: file_name.trim_end_matches(".fit").to_string(),
+        activity_name,
         sport,
         device,
         start_ts_utc: chrono::DateTime::from_timestamp_millis(start_ts)

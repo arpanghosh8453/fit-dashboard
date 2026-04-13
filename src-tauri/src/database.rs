@@ -70,6 +70,16 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS idx_records_activity_time ON records(activity_id, timestamp_ms);
             CREATE INDEX IF NOT EXISTS idx_activities_start_time ON activities(start_ts_utc);
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key VARCHAR PRIMARY KEY,
+                value VARCHAR NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS file_hash_blacklist (
+                file_hash VARCHAR PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT now()
+            );
             "#,
         )?;
         Ok(())
@@ -108,6 +118,18 @@ impl Database {
             params![token, expiry_iso],
         )?;
         Ok(())
+    }
+
+    pub fn delete_sessions_for_user(&self, user_id: i64) -> Result<()> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM sessions WHERE user_id = ?1", params![user_id])?;
+        Ok(())
+    }
+
+    pub fn purge_expired_sessions(&self) -> Result<usize> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        let deleted = conn.execute("DELETE FROM sessions WHERE expires_at <= now()", [])?;
+        Ok(deleted)
     }
 
     pub fn session_valid(&self, token: &str) -> Result<bool> {
@@ -293,4 +315,74 @@ fn insert_record(stmt: &mut duckdb::Statement<'_>, activity_id: i64, r: RecordPo
         "{}"
     ])?;
     Ok(())
+}
+
+impl Database {
+    pub fn get_activity_hash(&self, activity_id: i64) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare("SELECT file_hash FROM activities WHERE id = ?1")?;
+        let mut rows = stmt.query(params![activity_id])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(row.get(0)?));
+        }
+        Ok(None)
+    }
+
+    pub fn add_blacklisted_hash(&self, file_hash: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        conn.execute(
+            "DELETE FROM file_hash_blacklist WHERE file_hash = ?1",
+            params![file_hash],
+        )?;
+        conn.execute(
+            "INSERT INTO file_hash_blacklist (file_hash) VALUES (?1)",
+            params![file_hash],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_blacklisted_hash(&self, file_hash: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        conn.execute(
+            "DELETE FROM file_hash_blacklist WHERE file_hash = ?1",
+            params![file_hash],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_hash_blacklisted(&self, file_hash: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*) FROM file_hash_blacklist WHERE file_hash = ?1",
+        )?;
+        let count: i64 = stmt.query_row(params![file_hash], |r| r.get(0))?;
+        Ok(count > 0)
+    }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+        let mut rows = stmt.query(params![key])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(row.get(0)?));
+        }
+        Ok(None)
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        // DuckDB doesn't support INSERT OR REPLACE; delete then insert
+        conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
 }
