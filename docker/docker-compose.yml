@@ -1,0 +1,29 @@
+services:
+  fit-dashboard-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: fit-dashboard-api
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - fit_dashboard_data:/data
+    environment:
+      - FIT_DASHBOARD_DB=/data/fit-dashboard.duckdb
+
+  fit-dashboard-web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      args:
+        VITE_API_BASE: /api
+    container_name: fit-dashboard-web
+    restart: unless-stopped
+    depends_on:
+      - fit-dashboard-api
+    ports:
+      - "8088:80"
+
+volumes:
+  fit_dashboard_data:

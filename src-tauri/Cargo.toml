@@ -1,0 +1,29 @@
+[package]
+name = "fit-dashboard-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+argon2 = "0.5"
+axum = { version = "0.8", features = ["multipart"] }
+chrono = { version = "0.4", features = ["serde"] }
+duckdb = { version = "1.2", features = ["bundled"] }
+fitparser = "0.8"
+hex = "0.4"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "fs"] }
+tower-http = { version = "0.6", features = ["cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Optional desktop mode
+# tauri and tauri-plugin-shell can be enabled if you want to compile desktop binaries immediately.
+
+[features]
+default = ["web"]
+web = []
+tauri-app = []
