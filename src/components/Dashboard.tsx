@@ -1,4 +1,5 @@
 import { DragEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useActivityStore } from "../stores/activityStore";
 import { ActivityChart } from "./ActivityChart";
 import { ActivityMap } from "./ActivityMap";
@@ -200,6 +201,13 @@ export function Dashboard({ onLogout }: Props) {
   const dateFromBtnRef = useRef<HTMLButtonElement>(null);
   const dateToBtnRef = useRef<HTMLButtonElement>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{
+    completed: number;
+    total: number;
+    current?: string;
+    currentIndex?: number;
+    status: "processing" | "refreshing";
+  } | null>(null);
   const [forceBrowserPicker, setForceBrowserPicker] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -342,6 +350,26 @@ export function Dashboard({ onLogout }: Props) {
     return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: timeFormat === "12h" });
   }
 
+  async function waitForUiPaint() {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  function pushImportProgress(
+    progress: {
+      completed: number;
+      total: number;
+      current?: string;
+      currentIndex?: number;
+      status: "processing" | "refreshing";
+    },
+    message?: string,
+  ) {
+    flushSync(() => {
+      setImportProgress(progress);
+      if (message) setImportMessage(message);
+    });
+  }
+
   async function importFromPaths(paths: string[]) {
     if (!paths.length || isImporting || isSyncing) return;
     const validPaths = paths.filter((p) => {
@@ -354,27 +382,72 @@ export function Dashboard({ onLogout }: Props) {
     }
 
     setIsImporting(true);
+    pushImportProgress(
+      { completed: 0, total: validPaths.length, current: "Preparing queue...", status: "processing" },
+      `Processing 0/${validPaths.length}`,
+    );
+    await waitForUiPaint();
     let imported = 0, duplicates = 0, failed = 0;
+    let refreshError: string | null = null;
     for (let i = 0; i < validPaths.length; i++) {
       const path = validPaths[i];
       const fileName = path.split(/[\\/]/).pop() ?? path;
-      setImportMessage(`Processing ${i + 1}/${validPaths.length}: ${fileName}`);
+      pushImportProgress(
+        { completed: i, total: validPaths.length, current: fileName, currentIndex: i + 1, status: "processing" },
+        `Processing ${i + 1}/${validPaths.length}: ${fileName}`,
+      );
+      await waitForUiPaint();
       try {
         const result: any = await api.importActivityPath(path);
-        if (result?.status === "duplicate") duplicates++; else imported++;
+        if (result?.status === "duplicate") {
+          duplicates++;
+        } else {
+          imported++;
+          if (imported % 10 === 0) {
+            pushImportProgress(
+              {
+                completed: i + 1,
+                total: validPaths.length,
+                current: `Refreshing after ${imported} successful imports...`,
+                status: "refreshing",
+              },
+              `Imported ${imported} files. Refreshing list and stats...`,
+            );
+            await waitForUiPaint();
+            try {
+              await refresh();
+            } catch (err) {
+              if (!refreshError) refreshError = err instanceof Error ? err.message : "unknown";
+            }
+            pushImportProgress(
+              { completed: i + 1, total: validPaths.length, current: fileName, currentIndex: i + 1, status: "processing" },
+            );
+            await waitForUiPaint();
+          }
+        }
       } catch (err) {
         failed++;
         setImportMessage(`Failed on ${fileName}: ${err instanceof Error ? err.message : "unknown"}`);
       }
+      pushImportProgress(
+        { completed: i + 1, total: validPaths.length, current: fileName, currentIndex: i + 1, status: "processing" },
+        `Processed ${i + 1}/${validPaths.length}: ${fileName}`,
+      );
+      await waitForUiPaint();
     }
 
-    let refreshError: string | null = null;
     try {
+      pushImportProgress(
+        { completed: validPaths.length, total: validPaths.length, current: "Refreshing activity list...", status: "refreshing" },
+        "Import queue finished, refreshing activity list...",
+      );
+      await waitForUiPaint();
       await refresh();
     } catch (err) {
-      refreshError = err instanceof Error ? err.message : "unknown";
+      if (!refreshError) refreshError = err instanceof Error ? err.message : "unknown";
     }
     setIsImporting(false);
+    setImportProgress(null);
     if (refreshError) {
       setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}. Refresh failed: ${refreshError}`);
     } else {
@@ -434,24 +507,69 @@ export function Dashboard({ onLogout }: Props) {
     });
     if (!files.length) { setImportMessage("No supported files selected (.fit, .tcx, .gpx)."); return; }
     setIsImporting(true);
+    pushImportProgress(
+      { completed: 0, total: files.length, current: "Preparing queue...", status: "processing" },
+      `Processing 0/${files.length}`,
+    );
+    await waitForUiPaint();
     let imported = 0, duplicates = 0, failed = 0;
+    let refreshError: string | null = null;
     for (let i = 0; i < files.length; i++) {
-      setImportMessage(`Processing ${i + 1}/${files.length}: ${files[i].name}`);
+      pushImportProgress(
+        { completed: i, total: files.length, current: files[i].name, currentIndex: i + 1, status: "processing" },
+        `Processing ${i + 1}/${files.length}: ${files[i].name}`,
+      );
+      await waitForUiPaint();
       try {
         const result: any = await api.importFit(files[i]);
-        if (result?.status === "duplicate") duplicates++; else imported++;
+        if (result?.status === "duplicate") {
+          duplicates++;
+        } else {
+          imported++;
+          if (imported % 10 === 0) {
+            pushImportProgress(
+              {
+                completed: i + 1,
+                total: files.length,
+                current: `Refreshing after ${imported} successful imports...`,
+                status: "refreshing",
+              },
+              `Imported ${imported} files. Refreshing list and stats...`,
+            );
+            await waitForUiPaint();
+            try {
+              await refresh();
+            } catch (err) {
+              if (!refreshError) refreshError = err instanceof Error ? err.message : "unknown";
+            }
+            pushImportProgress(
+              { completed: i + 1, total: files.length, current: files[i].name, currentIndex: i + 1, status: "processing" },
+            );
+            await waitForUiPaint();
+          }
+        }
       } catch (err) {
         failed++;
         setImportMessage(`Failed on ${files[i].name}: ${err instanceof Error ? err.message : "unknown"}`);
       }
+      pushImportProgress(
+        { completed: i + 1, total: files.length, current: files[i].name, currentIndex: i + 1, status: "processing" },
+        `Processed ${i + 1}/${files.length}: ${files[i].name}`,
+      );
+      await waitForUiPaint();
     }
-    let refreshError: string | null = null;
     try {
+      pushImportProgress(
+        { completed: files.length, total: files.length, current: "Refreshing activity list...", status: "refreshing" },
+        "Import queue finished, refreshing activity list...",
+      );
+      await waitForUiPaint();
       await refresh();
     } catch (err) {
-      refreshError = err instanceof Error ? err.message : "unknown";
+      if (!refreshError) refreshError = err instanceof Error ? err.message : "unknown";
     }
     setIsImporting(false);
+    setImportProgress(null);
     if (refreshError) {
       setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}. Refresh failed: ${refreshError}`);
     } else {
@@ -476,14 +594,25 @@ export function Dashboard({ onLogout }: Props) {
     } catch (err) {
       setForceBrowserPicker(true);
       setImportMessage(
-        `Native file picker unavailable (${err instanceof Error ? err.message : "unknown"}). Click Select files again to use browser picker.`
+        `Native file picker unavailable (${err instanceof Error ? err.message : "unknown"}). Falling back to browser picker.`
       );
+      // Trigger browser picker immediately so users do not need a second click.
+      fileInputRef.current?.click();
       return;
     }
     if (!picked) return;
 
-    const paths = Array.isArray(picked) ? picked : [picked];
+    const paths = (Array.isArray(picked) ? picked : [picked]).map((p) => p.trim());
     await importFromPaths(paths);
+  }
+
+  function handleSelectFilesClick() {
+    if (isImporting || isSyncing) return;
+    if (isTauriRuntime() && !forceBrowserPicker) {
+      void importFromDesktopDialog();
+      return;
+    }
+    fileInputRef.current?.click();
   }
 
   async function syncFromStorage() {
@@ -615,7 +744,8 @@ export function Dashboard({ onLogout }: Props) {
           : "Bulk delete completed."
       );
     } catch (err) {
-      setImportMessage(`Bulk delete completed, but refresh failed: ${err instanceof Error ? err.message : "unknown"}`);
+      const detail = err instanceof Error ? err.message : String(err);
+      setImportMessage(`Bulk delete completed, but refresh failed: ${detail || "unknown"}`);
     } finally {
       setIsBulkDeleting(false);
       setBulkDeleteProgress(null);
@@ -629,6 +759,11 @@ export function Dashboard({ onLogout }: Props) {
   }
 
   const hasFilters = filterSport !== "all" || dateFrom || dateTo || minDurationMinutes || maxDurationMinutes || searchQuery;
+  const importDisplayIndex = importProgress
+    ? (importProgress.status === "processing"
+        ? (importProgress.currentIndex ?? importProgress.completed)
+        : importProgress.completed)
+    : 0;
 
   return (
     <div className="app-shell">
@@ -698,7 +833,7 @@ export function Dashboard({ onLogout }: Props) {
                   return next;
                 });
               }}>
-                <span className="section-title">{isImporting ? "Importing..." : "Import Activity Files"}</span>
+                <span className="section-title">{isImporting ? `Importing... ${importDisplayIndex}/${importProgress?.total ?? 0}` : "Import Activity Files"}</span>
                 <span className="section-header-right"><span className="chevron"><IconChevron /></span></span>
               </button>
               {isImportOpen && (
@@ -730,13 +865,7 @@ export function Dashboard({ onLogout }: Props) {
                     <div className="import-actions">
                       <button
                         className="import-btn"
-                        onClick={() => {
-                          if (isTauriRuntime() && !forceBrowserPicker) {
-                            void importFromDesktopDialog();
-                          } else {
-                            fileInputRef.current?.click();
-                          }
-                        }}
+                        onClick={handleSelectFilesClick}
                         disabled={isImporting || isSyncing}
                       >
                         {isImporting ? "Importing..." : "Select files (.fit/.tcx/.gpx)"}
@@ -745,6 +874,12 @@ export function Dashboard({ onLogout }: Props) {
                         <IconRefresh /> {isSyncing ? "Syncing..." : "Sync"}
                       </button>
                     </div>
+                    {isImporting && importProgress && (
+                      <div className="import-hint" role="status" aria-live="polite">
+                        {`Import queue: ${importDisplayIndex}/${importProgress.total}`}
+                        {importProgress.current ? ` - ${importProgress.current}` : ""}
+                      </div>
+                    )}
                     <span className="import-hint">Drop files here or use Select files. Batch queue runs sequentially for stability.</span>
                   </div>
                 </div>

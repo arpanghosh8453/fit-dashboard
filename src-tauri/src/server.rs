@@ -76,6 +76,7 @@ pub fn app(state: AppState) -> Router {
 }
 
 async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    tracing::debug!("status endpoint invoked");
     let has_user = state
         .db
         .has_user()
@@ -254,6 +255,7 @@ async fn list_activities(
         .db
         .list_activities()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::debug!(count = rows.len(), "list_activities completed");
     Ok(Json(serde_json::json!(rows)))
 }
 
@@ -266,6 +268,12 @@ async fn overview(
         .db
         .overview()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::debug!(
+        activity_count = stats.activity_count,
+        total_distance_m = stats.total_distance_m,
+        total_duration_s = stats.total_duration_s,
+        "overview completed"
+    );
     Ok(Json(serde_json::json!(stats)))
 }
 
@@ -276,10 +284,12 @@ async fn records(
     Query(q): Query<RecordsQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     ensure_session(&state, &headers)?;
+    let resolution = q.resolution_ms.unwrap_or(10_000);
     let rows = state
         .db
-        .records_downsampled(id, q.resolution_ms.unwrap_or(10_000))
+        .records_downsampled(id, resolution)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::debug!(activity_id = id, resolution_ms = resolution, count = rows.len(), "records completed");
     Ok(Json(serde_json::json!(rows)))
 }
 
@@ -290,8 +300,10 @@ async fn rename_activity(
     Json(payload): Json<RenameActivityPayload>,
 ) -> Result<impl IntoResponse, StatusCode> {
     ensure_session(&state, &headers)?;
+    tracing::info!(activity_id = id, "rename_activity endpoint invoked");
     let name = payload.name.trim();
     if name.is_empty() {
+        tracing::warn!(activity_id = id, "rename_activity rejected: empty name");
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -300,8 +312,10 @@ async fn rename_activity(
         .rename_activity(id, name)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if !changed {
+        tracing::warn!(activity_id = id, "rename_activity failed: not found");
         return Err(StatusCode::NOT_FOUND);
     }
+    tracing::info!(activity_id = id, "rename_activity completed");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -311,6 +325,7 @@ async fn delete_activity(
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, StatusCode> {
     ensure_session(&state, &headers)?;
+    tracing::info!(activity_id = id, "delete_activity endpoint invoked");
     let file_hash = state
         .db
         .get_activity_hash(id)
@@ -320,6 +335,7 @@ async fn delete_activity(
         .delete_activity(id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if !changed {
+        tracing::warn!(activity_id = id, "delete_activity failed: not found");
         return Err(StatusCode::NOT_FOUND);
     }
     if let Some(hash) = file_hash {
@@ -328,6 +344,7 @@ async fn delete_activity(
             .add_blacklisted_hash(&hash)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
+    tracing::info!(activity_id = id, "delete_activity completed");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -433,6 +450,7 @@ async fn get_storage_info(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     ensure_session(&state, &headers)?;
+    tracing::debug!("get_storage_info completed");
     Ok(Json(serde_json::json!({
         "data_dir": state.storage.data_dir.clone(),
         "db_path": state.storage.db_path.clone(),
@@ -452,6 +470,7 @@ fn extract_session(state: &AppState, headers: &HeaderMap) -> Result<String, Stat
         .session_valid(&token)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     {
+        tracing::warn!("session validation failed");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -479,6 +498,7 @@ async fn verify_supporter_code(
 
     let trimmed = payload.code.trim().to_string();
     if trimmed.is_empty() {
+        tracing::warn!("verify_supporter_code rejected: empty code");
         return Ok(Json(false));
     }
 
@@ -488,6 +508,7 @@ async fn verify_supporter_code(
     let hash_hex: String = hash_bytes.iter().map(|b| format!("{:02x}", b)).collect();
 
     if hash_hex != SUPPORTER_HASH {
+        tracing::warn!("verify_supporter_code rejected: invalid code");
         return Ok(Json(false));
     }
 
@@ -499,6 +520,8 @@ async fn verify_supporter_code(
         .db
         .set_setting("donation_dismissed", "true")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tracing::info!("verify_supporter_code accepted and supporter status enabled");
 
     Ok(Json(true))
 }
@@ -513,6 +536,7 @@ async fn get_supporter_status(
         .flatten()
         .as_deref()
         == Some("true");
+    tracing::debug!(active, "get_supporter_status completed");
     Json(active)
 }
 
@@ -526,6 +550,7 @@ async fn get_donation_dismissed(
         .flatten()
         .as_deref()
         == Some("true");
+    tracing::debug!(dismissed, "get_donation_dismissed completed");
     Json(dismissed)
 }
 
@@ -550,6 +575,7 @@ async fn set_supporter_status(
             if payload.active { "true" } else { "false" },
         )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::info!(active = payload.active, "set_supporter_status completed");
     Ok(Json(payload.active))
 }
 
@@ -564,6 +590,7 @@ async fn set_donation_dismissed(
             if payload.dismissed { "true" } else { "false" },
         )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::info!(dismissed = payload.dismissed, "set_donation_dismissed completed");
     Ok(Json(payload.dismissed))
 }
 

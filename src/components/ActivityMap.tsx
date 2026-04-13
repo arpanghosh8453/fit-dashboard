@@ -306,7 +306,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const theme = useSettingsStore((s) => s.theme);
 
-  const [pathColorMode, setPathColorMode] = useState<PathColorMode>("solid");
+  const [pathColorMode, setPathColorMode] = useState<PathColorMode>("heart_rate");
   const pathColorModeRef = useRef(pathColorMode);
 
   const gpsRecords = useMemo(
