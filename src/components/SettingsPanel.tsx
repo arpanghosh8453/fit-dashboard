@@ -13,13 +13,11 @@ export function SettingsPanel() {
     showSettings,
     theme,
     distanceUnit,
-    dateFormat,
     timeFormat,
     mapStyle,
     supporterBadge,
     setTheme,
     setDistanceUnit,
-    setDateFormat,
     setTimeFormat,
     setMapStyle,
     verifySupporterCode,
@@ -83,11 +81,6 @@ export function SettingsPanel() {
           <label><span>Distance Unit</span><select value={distanceUnit} onChange={(e) => setDistanceUnit(e.target.value as "km" | "mi")}>
             <option value="km">Kilometers</option>
             <option value="mi">Miles</option>
-          </select></label>
-
-          <label><span>Date Format</span><select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as "locale" | "iso")}>
-            <option value="locale">Locale Default</option>
-            <option value="iso">ISO (YYYY-MM-DD)</option>
           </select></label>
 
           <label><span>Time Format</span><select value={timeFormat} onChange={(e) => setTimeFormat(e.target.value as "12h" | "24h")}>

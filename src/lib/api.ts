@@ -1,5 +1,5 @@
 import axios from "axios";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { Activity, OverviewStats, RecordPoint } from "../types";
 
 type StorageInfo = {
@@ -16,18 +16,21 @@ type SyncSummary = {
   failed: number;
 };
 
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const base = (import.meta.env.VITE_API_BASE ?? "http://localhost:8080").replace(/\/$/, "");
 
 const SESSION_KEY = "sessionToken";
 const SESSION_TS_KEY = "sessionTokenTs";
 const SESSION_TTL_MS = 72 * 60 * 60 * 1000; // 72 hours
 
+function isTauriRuntime(): boolean {
+  return isTauri();
+}
+
 function getStoredSession(): string | null {
   const token = localStorage.getItem(SESSION_KEY);
   if (!token) return null;
   // Desktop (Tauri) tokens never expire — user logs out manually
-  if (isTauri) return token;
+  if (isTauriRuntime()) return token;
   const ts = localStorage.getItem(SESSION_TS_KEY);
   if (!ts) return null;
   if (Date.now() - Number(ts) > SESSION_TTL_MS) {
@@ -68,7 +71,7 @@ export const api = {
   getStoredSession,
 
   async status(): Promise<{ needs_onboarding: boolean }> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke("status");
     }
     const res = await webClient.get("/status");
@@ -76,7 +79,7 @@ export const api = {
   },
 
   async onboard(username: string, password: string) {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<{ token: string }>("onboard", { username, password });
     }
     const res = await webClient.post("/onboard", { username, password });
@@ -84,7 +87,7 @@ export const api = {
   },
 
   async unlock(password: string) {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<{ token: string }>("unlock", { password });
     }
     const res = await webClient.post("/unlock", { password });
@@ -92,7 +95,7 @@ export const api = {
   },
 
   async logout() {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       await invoke("logout");
       return;
     }
@@ -100,9 +103,9 @@ export const api = {
   },
 
   async importFit(file: File) {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-      return invoke("import_fit_bytes", { file_name: file.name, bytes });
+      return invoke("import_fit_bytes", { fileName: file.name, bytes });
     }
 
     const fd = new FormData();
@@ -122,8 +125,15 @@ export const api = {
     }
   },
 
+  async importActivityPath(path: string) {
+    if (isTauriRuntime()) {
+      return invoke("import_activity_path", { path });
+    }
+    throw new Error("path-based import is only supported in desktop mode");
+  },
+
   async syncFitFiles(): Promise<SyncSummary> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<SyncSummary>("sync_fit_files");
     }
     const res = await webClient.post("/sync-fit-files");
@@ -131,7 +141,7 @@ export const api = {
   },
 
   async getStorageInfo(): Promise<StorageInfo> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<StorageInfo>("get_storage_info");
     }
     const res = await webClient.get("/storage-info");
@@ -139,7 +149,7 @@ export const api = {
   },
 
   async listActivities(): Promise<Activity[]> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke("list_activities");
     }
     const res = await webClient.get("/activities");
@@ -147,7 +157,7 @@ export const api = {
   },
 
   async getOverview(): Promise<OverviewStats> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke("get_overview");
     }
     const res = await webClient.get("/overview");
@@ -155,8 +165,8 @@ export const api = {
   },
 
   async getRecords(activityId: number, resolutionMs = 10000): Promise<RecordPoint[]> {
-    if (isTauri) {
-      return invoke("get_records", { activity_id: activityId, resolution_ms: resolutionMs });
+    if (isTauriRuntime()) {
+      return invoke("get_records", { activityId, resolutionMs });
     }
     const res = await webClient.get(`/records/${activityId}`, {
       params: { resolution_ms: resolutionMs }
@@ -165,21 +175,21 @@ export const api = {
   },
 
   async renameActivity(activityId: number, name: string) {
-    if (isTauri) {
-      return invoke("rename_activity", { activity_id: activityId, name });
+    if (isTauriRuntime()) {
+      return invoke("rename_activity", { activityId, name });
     }
     await webClient.patch(`/activities/${activityId}`, { name });
   },
 
   async deleteActivity(activityId: number) {
-    if (isTauri) {
-      return invoke("delete_activity", { activity_id: activityId });
+    if (isTauriRuntime()) {
+      return invoke("delete_activity", { activityId });
     }
     await webClient.delete(`/activities/${activityId}`);
   },
 
   async verifySupporterCode(code: string): Promise<boolean> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<boolean>("verify_supporter_code", { code });
     }
     const res = await webClient.post("/supporter/verify", { code });
@@ -187,7 +197,7 @@ export const api = {
   },
 
   async getSupporterStatus(): Promise<boolean> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<boolean>("get_supporter_status");
     }
     const res = await webClient.get("/supporter/status");
@@ -195,7 +205,7 @@ export const api = {
   },
 
   async setSupporterStatus(active: boolean): Promise<boolean> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<boolean>("set_supporter_status", { active });
     }
     const res = await webClient.post("/supporter/status", { active });
@@ -203,7 +213,7 @@ export const api = {
   },
 
   async getDonationDismissed(): Promise<boolean> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<boolean>("get_donation_dismissed");
     }
     const res = await webClient.get("/supporter/donation");
@@ -211,7 +221,7 @@ export const api = {
   },
 
   async setDonationDismissed(dismissed: boolean): Promise<boolean> {
-    if (isTauri) {
+    if (isTauriRuntime()) {
       return invoke<boolean>("set_donation_dismissed", { dismissed });
     }
     const res = await webClient.post("/supporter/donation", { dismissed });

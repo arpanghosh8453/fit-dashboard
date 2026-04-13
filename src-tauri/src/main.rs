@@ -2,6 +2,7 @@ mod auth;
 mod database;
 mod fit_parser;
 mod models;
+#[cfg(all(feature = "web", not(feature = "tauri-app")))]
 mod server;
 mod state;
 #[cfg(feature = "tauri-app")]
@@ -121,7 +122,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    #[cfg(feature = "web")]
+    #[cfg(all(feature = "web", not(feature = "tauri-app")))]
     {
         let app = server::app(state);
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
@@ -130,6 +131,8 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    #[allow(unreachable_code)]
-    Ok(())
+    #[cfg(not(any(feature = "tauri-app", feature = "web")))]
+    {
+        return Ok(());
+    }
 }

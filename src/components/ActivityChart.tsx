@@ -4,9 +4,11 @@ import type { RecordPoint } from "../types";
 type Props = {
   records: RecordPoint[];
   theme: "light" | "dark";
+  zoomRange?: { start: number; end: number } | null;
+  onZoomChange?: (range: { start: number; end: number }) => void;
 };
 
-export function ActivityChart({ records, theme }: Props) {
+export function ActivityChart({ records, theme, zoomRange, onZoomChange }: Props) {
   const t0 = records[0]?.timestamp_ms ?? 0;
   
   // Format MM:SS or HH:MM:SS
@@ -75,8 +77,22 @@ export function ActivityChart({ records, theme }: Props) {
       splitLine: { lineStyle: { color: gridLine } },
     },
     dataZoom: [
-      { type: "inside", zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false },
-      { type: "slider", height: 18, borderColor: "transparent", backgroundColor: gridLine, labelFormatter: (val: number) => formatRelTime(val) },
+      {
+        type: "inside",
+        zoomOnMouseWheel: "ctrl",
+        moveOnMouseWheel: false,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
+      {
+        type: "slider",
+        height: 18,
+        borderColor: "transparent",
+        backgroundColor: gridLine,
+        labelFormatter: (val: number) => formatRelTime(val),
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
     ],
     series: [
       {
@@ -91,5 +107,16 @@ export function ActivityChart({ records, theme }: Props) {
     ],
   };
 
-  return <ReactECharts option={option} style={{ height: 320, width: "100%" }} />;
+  const onEvents = {
+    datazoom: (evt: any) => {
+      const batch = evt?.batch?.[0];
+      const start = typeof batch?.start === "number" ? batch.start : (typeof evt?.start === "number" ? evt.start : null);
+      const end = typeof batch?.end === "number" ? batch.end : (typeof evt?.end === "number" ? evt.end : null);
+      if (start !== null && end !== null) {
+        onZoomChange?.({ start, end });
+      }
+    },
+  };
+
+  return <ReactECharts option={option} onEvents={onEvents} style={{ height: 320, width: "100%" }} />;
 }

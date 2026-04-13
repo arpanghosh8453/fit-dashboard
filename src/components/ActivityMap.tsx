@@ -92,39 +92,32 @@ function getMetricValues(recs: RecordPoint[], mode: PathColorMode): number[] {
 function buildColoredGeoJson(
   gpsRecs: RecordPoint[],
   coords: number[][],
-  mode: PathColorMode
+  mode: PathColorMode,
+  solidColor: string
 ): GeoJSON.FeatureCollection<GeoJSON.Geometry> {
   if (coords.length < 2) {
     return { type: "FeatureCollection", features: [] };
   }
 
-  // Use a single continuous LineString for solid paths to avoid
-  // segment overlapping artifacts (disconnections/beading).
-  if (mode === "solid") {
-    return {
-      type: "FeatureCollection",
-      features: [
-        {
-          type: "Feature",
-          geometry: { type: "LineString", coordinates: coords },
-          properties: { color: "#f0c24a" }
-        }
-      ]
-    };
-  }
-
   let values: number[] | null = null;
   let min = 0, max = 1, range = 1;
 
-  values = getMetricValues(gpsRecs, mode);
-  min = Infinity; max = -Infinity;
-  for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
-  range = (max - min) || 1;
+  if (mode !== "solid") {
+    values = getMetricValues(gpsRecs, mode);
+    min = Infinity; max = -Infinity;
+    for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
+    range = (max - min) || 1;
+  }
+
+  const firstTsMs = gpsRecs.find((r) => Number.isFinite(r.timestamp_ms))?.timestamp_ms ?? 0;
 
   const features: GeoJSON.Feature<GeoJSON.Geometry>[] = [];
   for (let i = 0; i < coords.length - 1; i++) {
-    const color = valueToColor((values![i] - min) / range);
+    const color = mode === "solid" ? solidColor : valueToColor((values![i] - min) / range);
     const r = gpsRecs[i];
+    const elapsedSeconds = Number.isFinite(r.timestamp_ms)
+      ? Math.max(0, Math.round((r.timestamp_ms - firstTsMs) / 1000))
+      : null;
     features.push({
       type: "Feature",
       geometry: { type: "LineString", coordinates: [coords[i], coords[i + 1]] },
@@ -135,29 +128,164 @@ function buildColoredGeoJson(
         altitude_m: r.altitude_m != null ? Math.round(r.altitude_m) : 0,
         cadence: r.cadence ?? 0,
         power_w: r.power ?? 0,
-        temp_c: r.temperature_c != null ? Math.round(r.temperature_c * 10) / 10 : 0,
+        temp_c: r.temperature_c != null ? Math.round(r.temperature_c * 10) / 10 : null,
+        elapsed_s: elapsedSeconds,
       }
     });
   }
   return { type: "FeatureCollection", features };
 }
 
+function buildSolidDisplayGeoJson(
+  coords: number[][],
+  solidColor: string
+): GeoJSON.FeatureCollection<GeoJSON.Geometry> {
+  if (coords.length < 2) return { type: "FeatureCollection", features: [] };
+  return {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: coords },
+      properties: { color: solidColor }
+    }]
+  };
+}
+
+function buildGradientExpression(
+  gpsRecs: RecordPoint[],
+  mode: PathColorMode,
+  fallbackColor: string
+): any[] {
+  if (mode === "solid" || gpsRecs.length < 2) {
+    return ["interpolate", ["linear"], ["line-progress"], 0, fallbackColor, 1, fallbackColor];
+  }
+
+  const values = getMetricValues(gpsRecs, mode);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of values) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const range = (max - min) || 1;
+
+  const maxStops = 220;
+  const stride = Math.max(1, Math.floor(values.length / maxStops));
+  const expr: any[] = ["interpolate", ["linear"], ["line-progress"]];
+
+  let lastProgress = -1;
+  for (let i = 0; i < values.length; i += stride) {
+    const progress = Math.max(0, Math.min(1, i / Math.max(1, values.length - 1)));
+    if (progress <= lastProgress) continue;
+    const color = valueToColor((values[i] - min) / range);
+    expr.push(progress, color);
+    lastProgress = progress;
+  }
+
+  // Ensure final stop exists at 1.0 without duplicate stop positions.
+  const lastColor = valueToColor((values[values.length - 1] - min) / range);
+  if (lastProgress < 1) {
+    expr.push(1, lastColor);
+    lastProgress = 1;
+  }
+
+  // Minimum valid interpolate expression requires at least two stops.
+  if (expr.length <= 7) {
+    return ["interpolate", ["linear"], ["line-progress"], 0, fallbackColor, 1, lastColor];
+  }
+
+  return expr;
+}
+
+function buildMarkerGeoJson(coords: number[][]): GeoJSON.FeatureCollection<GeoJSON.Geometry> {
+  if (coords.length === 0) return { type: "FeatureCollection", features: [] };
+  const start = coords[0];
+  const end = coords[coords.length - 1];
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: start },
+        properties: { label: "S", color: "#22c55e" }
+      },
+      {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: end },
+        properties: { label: "E", color: "#ef4444" }
+      }
+    ]
+  };
+}
+
 /* ── Tooltip builder ─────────────────────────────────────────────── */
 
+function formatElapsed(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = Math.floor(safe % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 function buildTooltipHtml(props: Record<string, any>): string {
+  const asFiniteNumber = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const speed = asFiniteNumber(props.speed_kmh);
+  const heartRate = asFiniteNumber(props.heart_rate);
+  const altitude = asFiniteNumber(props.altitude_m);
+  const cadence = asFiniteNumber(props.cadence);
+  const power = asFiniteNumber(props.power_w);
+  const temp = asFiniteNumber(props.temp_c);
+  const elapsed = asFiniteNumber(props.elapsed_s);
+
+  const fmt2 = (value: number): string => {
+    const fixed = value.toFixed(2);
+    return fixed.replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+  };
+
+  const iconSvg = (kind: "speed" | "heart" | "elevation" | "cadence" | "power" | "temp" | "duration") => {
+    const common = `class="tt-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+    switch (kind) {
+      case "speed":
+        return `<svg ${common}><path d="M12 12m-10 0a10 10 0 1 0 20 0"/><path d="M12 12l4-4"/><circle cx="12" cy="12" r="1"/></svg>`;
+      case "heart":
+        return `<svg ${common}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0016.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 002 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>`;
+      case "elevation":
+        return `<svg ${common}><path d="m8 3 4 8 5-5 5 15H2L8 3z"/></svg>`;
+      case "cadence":
+        return `<svg ${common}><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>`;
+      case "power":
+        return `<svg ${common}><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`;
+      case "temp":
+        return `<svg ${common}><path d="M14 14.76V3a2 2 0 0 0-4 0v11.76a4 4 0 1 0 4 0Z"/></svg>`;
+      case "duration":
+        return `<svg ${common}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+    }
+  };
+
+  const row = (icon: "speed" | "heart" | "elevation" | "cadence" | "power" | "temp" | "duration", label: string, value: string) => (
+    `<div class="tt-row"><span class="tt-row-left"><span class="tt-icon">${iconSvg(icon)}</span><span>${label}</span></span><strong>${value}</strong></div>`
+  );
+
   const rows: string[] = [];
-  if (Number(props.speed_kmh) > 0)
-    rows.push(`<div class="tt-row"><span>Speed</span><strong>${props.speed_kmh} km/h</strong></div>`);
-  if (Number(props.heart_rate) > 0)
-    rows.push(`<div class="tt-row"><span>HR</span><strong>${props.heart_rate} bpm</strong></div>`);
-  if (Number(props.altitude_m) > 0)
-    rows.push(`<div class="tt-row"><span>Altitude</span><strong>${props.altitude_m} m</strong></div>`);
-  if (Number(props.cadence) > 0)
-    rows.push(`<div class="tt-row"><span>Cadence</span><strong>${props.cadence} rpm</strong></div>`);
-  if (Number(props.power_w) > 0)
-    rows.push(`<div class="tt-row"><span>Power</span><strong>${props.power_w} W</strong></div>`);
-  if (Number(props.temp_c) !== 0)
-    rows.push(`<div class="tt-row"><span>Temp</span><strong>${props.temp_c} \u00b0C</strong></div>`);
+  if (speed !== null && speed > 0)
+    rows.push(row("speed", "Speed", `${fmt2(speed)} km/h`));
+  if (heartRate !== null && heartRate > 0)
+    rows.push(row("heart", "Heart", `${fmt2(heartRate)} bpm`));
+  if (altitude !== null && altitude > 0)
+    rows.push(row("elevation", "Elevation", `${fmt2(altitude)} m`));
+  if (cadence !== null && cadence > 0)
+    rows.push(row("cadence", "Cadence", `${fmt2(cadence)} rpm`));
+  if (power !== null && power > 0)
+    rows.push(row("power", "Power", `${fmt2(power)} W`));
+  rows.push(row("temp", "Temp", temp !== null ? `${fmt2(temp)} &deg;C` : "&mdash;"));
+  if (elapsed !== null)
+    rows.push(row("duration", "Duration", formatElapsed(elapsed)));
   if (rows.length === 0) return `<div class="map-tooltip"><em style="color:var(--text-muted)">No data at this point</em></div>`;
   return `<div class="map-tooltip">${rows.join("")}</div>`;
 }
@@ -165,8 +293,12 @@ function buildTooltipHtml(props: Record<string, any>): string {
 /* ── Component ───────────────────────────────────────────────────── */
 
 const SOURCE_ID = "activity-route";
+const HIT_SOURCE_ID = "activity-route-hit-source";
+const MARKER_SOURCE_ID = "activity-route-markers";
 const LAYER_ID = "activity-route-layer";
 const HIT_LAYER_ID = "activity-route-hit";
+const MARKER_LAYER_ID = "activity-route-markers-layer";
+const MARKER_LABEL_LAYER_ID = "activity-route-markers-label-layer";
 
 export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -202,50 +334,103 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
     const coords = coordinatesRef.current;
     const gpsRecs = gpsRecordsRef.current;
     const mode = pathColorModeRef.current;
+    const solidPathColor = "#d65252";
 
     if (!coords.length) {
+      if (map.getLayer(MARKER_LABEL_LAYER_ID)) map.removeLayer(MARKER_LABEL_LAYER_ID);
+      if (map.getLayer(MARKER_LAYER_ID)) map.removeLayer(MARKER_LAYER_ID);
       if (map.getLayer(HIT_LAYER_ID)) map.removeLayer(HIT_LAYER_ID);
       if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID);
+      if (map.getSource(MARKER_SOURCE_ID)) map.removeSource(MARKER_SOURCE_ID);
+      if (map.getSource(HIT_SOURCE_ID)) map.removeSource(HIT_SOURCE_ID);
       if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
       return;
     }
 
-    const geojson = buildColoredGeoJson(gpsRecs, coords, mode);
-    const existing = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    const hitGeojson = buildColoredGeoJson(gpsRecs, coords, mode, solidPathColor);
+    const displayGeojson = buildSolidDisplayGeoJson(coords, solidPathColor);
+    const markerGeojson = buildMarkerGeoJson(coords);
+    const gradientExpr = buildGradientExpression(gpsRecs, mode, solidPathColor);
+    const existingHit = map.getSource(HIT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    const existingMarkers = map.getSource(MARKER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
 
-    if (existing) {
-      existing.setData(geojson);
+    // Always recreate the display source/layer so lineMetrics is guaranteed on hot reloads.
+    if (map.getLayer(LAYER_ID)) {
+      map.removeLayer(LAYER_ID);
+    }
+    if (map.getSource(SOURCE_ID)) {
+      map.removeSource(SOURCE_ID);
+    }
+    map.addSource(SOURCE_ID, { type: "geojson", data: displayGeojson, lineMetrics: true });
+
+    if (existingHit) {
+      existingHit.setData(hitGeojson);
     } else {
-      map.addSource(SOURCE_ID, { type: "geojson", data: geojson });
+      map.addSource(HIT_SOURCE_ID, { type: "geojson", data: hitGeojson });
     }
 
-    if (!map.getLayer(LAYER_ID)) {
-      map.addLayer({
-        id: LAYER_ID,
-        type: "line",
-        source: SOURCE_ID,
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-width": 4,
-          "line-color": ["get", "color"] as any,
-          "line-opacity": 1.0
-        }
-      });
+    if (existingMarkers) {
+      existingMarkers.setData(markerGeojson);
     } else {
-      map.setPaintProperty(LAYER_ID, "line-color", ["get", "color"]);
+      map.addSource(MARKER_SOURCE_ID, { type: "geojson", data: markerGeojson });
     }
+
+    map.addLayer({
+      id: LAYER_ID,
+      type: "line",
+      source: SOURCE_ID,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-width": 4,
+        "line-color": solidPathColor,
+        "line-opacity": 1
+      }
+    });
+    map.setPaintProperty(LAYER_ID, "line-color", solidPathColor);
+    map.setPaintProperty(LAYER_ID, "line-gradient", gradientExpr as any);
+    map.setPaintProperty(LAYER_ID, "line-opacity", 1);
 
     // Invisible wider hit-area layer for easier hover detection
     if (!map.getLayer(HIT_LAYER_ID)) {
       map.addLayer({
         id: HIT_LAYER_ID,
         type: "line",
-        source: SOURCE_ID,
+        source: HIT_SOURCE_ID,
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-width": 20,
           "line-color": "rgba(0,0,0,0)",
           "line-opacity": 0
+        }
+      });
+    }
+
+    if (!map.getLayer(MARKER_LAYER_ID)) {
+      map.addLayer({
+        id: MARKER_LAYER_ID,
+        type: "circle",
+        source: MARKER_SOURCE_ID,
+        paint: {
+          "circle-radius": 5,
+          "circle-color": ["get", "color"] as any,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5
+        }
+      });
+    }
+
+    if (!map.getLayer(MARKER_LABEL_LAYER_ID)) {
+      map.addLayer({
+        id: MARKER_LABEL_LAYER_ID,
+        type: "symbol",
+        source: MARKER_SOURCE_ID,
+        layout: {
+          "text-field": ["get", "label"] as any,
+          "text-size": 9,
+          "text-font": ["Open Sans Bold"]
+        },
+        paint: {
+          "text-color": "#ffffff"
         }
       });
     }
@@ -269,6 +454,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle }: Props) {
       style: styleFromMap(mapStyle, theme),
       center: [0, 0],
       zoom: 2,
+      minZoom: 5,
       cooperativeGestures: true,
     });
     mapRef.current = map;

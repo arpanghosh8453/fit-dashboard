@@ -5,7 +5,7 @@ use tauri::State;
 
 use crate::{
     auth::{create_session, hash_password, verify_password},
-    fit_parser::parse_fit_bytes,
+    fit_parser::parse_activity_bytes,
     models::{Activity, OverviewStats, RecordPoint, TokenResponse},
     state::{AppState, StorageInfo},
 };
@@ -25,6 +25,7 @@ struct SyncSummary {
 
 pub fn run(state: AppState) -> anyhow::Result<()> {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             status,
@@ -32,6 +33,7 @@ pub fn run(state: AppState) -> anyhow::Result<()> {
             unlock,
             logout,
             import_fit_bytes,
+            import_activity_path,
             sync_fit_files,
             get_storage_info,
             list_activities,
@@ -104,7 +106,26 @@ fn import_fit_bytes(
     file_name: String,
     bytes: Vec<u8>,
 ) -> Result<serde_json::Value, String> {
-    let parsed = parse_fit_bytes(&file_name, &bytes).map_err(|e| e.to_string())?;
+    import_activity_inner(&state, &file_name, &bytes)
+}
+
+#[tauri::command]
+fn import_activity_path(state: State<'_, AppState>, path: String) -> Result<serde_json::Value, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("failed reading file: {e}"))?;
+    let file_name = Path::new(&path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("activity")
+        .to_string();
+    import_activity_inner(&state, &file_name, &bytes)
+}
+
+fn import_activity_inner(
+    state: &State<'_, AppState>,
+    file_name: &str,
+    bytes: &[u8],
+) -> Result<serde_json::Value, String> {
+    let parsed = parse_activity_bytes(file_name, bytes).map_err(|e| e.to_string())?;
 
     state
         .db
@@ -119,7 +140,7 @@ fn import_fit_bytes(
         return Ok(serde_json::json!({ "status": "duplicate" }));
     }
 
-    persist_fit_file(&state, &file_name, &bytes, &parsed.file_hash).map_err(|e| e.to_string())?;
+    persist_fit_file(state, file_name, bytes, &parsed.file_hash).map_err(|e| e.to_string())?;
     let activity_id = state.db.insert_activity(parsed).map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({ "status": "ok", "activity_id": activity_id }))
@@ -145,7 +166,7 @@ fn sync_fit_files(state: State<'_, AppState>) -> Result<SyncSummary, String> {
             }
         };
         let path = entry.path();
-        if !is_fit_file(&path) {
+        if !is_supported_activity_file(&path) {
             continue;
         }
 
@@ -186,9 +207,9 @@ fn sync_fit_files(state: State<'_, AppState>) -> Result<SyncSummary, String> {
         let file_name = path
             .file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or("activity.fit")
+            .unwrap_or("activity")
             .to_string();
-        match parse_fit_bytes(&file_name, &bytes)
+        match parse_activity_bytes(&file_name, &bytes)
             .and_then(|parsed| state.db.insert_activity(parsed).map(|_| ()))
         {
             Ok(_) => summary.imported += 1,
@@ -339,10 +360,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn is_fit_file(path: &Path) -> bool {
+fn is_supported_activity_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("fit"))
+        .map(|e| {
+            e.eq_ignore_ascii_case("fit")
+                || e.eq_ignore_ascii_case("tcx")
+                || e.eq_ignore_ascii_case("gpx")
+        })
         .unwrap_or(false)
 }
 

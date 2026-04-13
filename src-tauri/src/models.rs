@@ -30,6 +30,7 @@ pub struct RecordPoint {
 #[derive(Debug, Clone)]
 pub struct ParsedActivity {
     pub file_name: String,
+    pub source_format: String,
     pub activity_name: String,
     pub sport: String,
     pub device: String,
@@ -49,17 +50,20 @@ pub struct OverviewStats {
     pub total_duration_s: f64,
 }
 
+#[cfg(all(feature = "web", not(feature = "tauri-app")))]
 #[derive(Debug, Deserialize)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
 }
 
+#[cfg(all(feature = "web", not(feature = "tauri-app")))]
 #[derive(Debug, Deserialize)]
 pub struct UnlockPayload {
     pub password: String,
 }
 
+#[cfg(all(feature = "web", not(feature = "tauri-app")))]
 #[derive(Debug, Deserialize)]
 pub struct RenameActivityPayload {
     pub name: String,

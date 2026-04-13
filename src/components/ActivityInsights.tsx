@@ -4,6 +4,8 @@ import type { RecordPoint } from "../types";
 type Props = {
   records: RecordPoint[];
   theme: "light" | "dark";
+  zoomRange?: { start: number; end: number } | null;
+  onZoomChange?: (range: { start: number; end: number }) => void;
 };
 
 function safeAvg(values: Array<number | undefined>): number {
@@ -21,7 +23,7 @@ function quantile(sorted: number[], q: number): number {
   return sorted[lo] * (hi - idx) + sorted[hi] * (idx - lo);
 }
 
-export function ActivityInsights({ records, theme }: Props) {
+export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Props) {
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
@@ -123,8 +125,21 @@ export function ActivityInsights({ records, theme }: Props) {
       },
     ],
     dataZoom: [
-      { type: "inside", zoomOnMouseWheel: "ctrl", moveOnMouseWheel: false },
-      { type: "slider", height: 18, borderColor: "transparent", backgroundColor: gridLine },
+      {
+        type: "inside",
+        zoomOnMouseWheel: "ctrl",
+        moveOnMouseWheel: false,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
+      {
+        type: "slider",
+        height: 18,
+        borderColor: "transparent",
+        backgroundColor: gridLine,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
     ],
     series: [
       {
@@ -181,6 +196,23 @@ export function ActivityInsights({ records, theme }: Props) {
         nameTextStyle: { color: axisColor, fontSize: 11 },
         axisLabel: { color: axisColor, fontSize: 11 },
         splitLine: { show: false },
+      },
+    ],
+    dataZoom: [
+      {
+        type: "inside",
+        zoomOnMouseWheel: "ctrl",
+        moveOnMouseWheel: false,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
+      {
+        type: "slider",
+        height: 18,
+        borderColor: "transparent",
+        backgroundColor: gridLine,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
       },
     ],
     series: [
@@ -244,6 +276,23 @@ export function ActivityInsights({ records, theme }: Props) {
       axisLabel: { color: axisColor, fontSize: 11 },
       splitLine: { lineStyle: { color: gridLine } },
     },
+    dataZoom: [
+      {
+        type: "inside",
+        zoomOnMouseWheel: "ctrl",
+        moveOnMouseWheel: false,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
+      {
+        type: "slider",
+        height: 18,
+        borderColor: "transparent",
+        backgroundColor: gridLine,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
+    ],
     series: [
       {
         name: "Pace", type: "line", smooth: true, showSymbol: false,
@@ -285,15 +334,26 @@ export function ActivityInsights({ records, theme }: Props) {
     ],
   };
 
+  const zoomEvents = {
+    datazoom: (evt: any) => {
+      const batch = evt?.batch?.[0];
+      const start = typeof batch?.start === "number" ? batch.start : (typeof evt?.start === "number" ? evt.start : null);
+      const end = typeof batch?.end === "number" ? batch.end : (typeof evt?.end === "number" ? evt.end : null);
+      if (start !== null && end !== null) {
+        onZoomChange?.({ start, end });
+      }
+    },
+  };
+
   return (
     <section className="insight-grid">
       <article className="panel">
         <h3>Speed + Elevation</h3>
-        <ReactECharts option={timelineOption} style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={timelineOption} onEvents={zoomEvents} style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>Pace Trend</h3>
-        <ReactECharts option={paceOption} style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={paceOption} onEvents={zoomEvents} style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>Heart-Rate Zones</h3>
@@ -301,7 +361,7 @@ export function ActivityInsights({ records, theme }: Props) {
       </article>
       <article className="panel">
         <h3>Cadence & Power</h3>
-        <ReactECharts option={barsOption} style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={barsOption} onEvents={zoomEvents} style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
         <h3>Effort Heatmap</h3>

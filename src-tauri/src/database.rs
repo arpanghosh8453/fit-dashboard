@@ -46,8 +46,8 @@ impl Database {
                 device VARCHAR,
                 start_ts_utc TIMESTAMP,
                 end_ts_utc TIMESTAMP,
-                duration_s DOUBLE,
-                distance_m DOUBLE,
+                duration_s REAL,
+                distance_m REAL,
                 source VARCHAR,
                 imported_at TIMESTAMP DEFAULT now(),
                 metadata_json VARCHAR
@@ -58,13 +58,13 @@ impl Database {
                 timestamp_ms BIGINT NOT NULL,
                 latitude DOUBLE,
                 longitude DOUBLE,
-                altitude_m DOUBLE,
-                distance_m DOUBLE,
-                speed_m_s DOUBLE,
+                altitude_m REAL,
+                distance_m REAL,
+                speed_m_s REAL,
                 cadence BIGINT,
                 heart_rate BIGINT,
                 power BIGINT,
-                temperature_c DOUBLE,
+                temperature_c REAL,
                 raw_fields_json VARCHAR
             );
 
@@ -82,6 +82,16 @@ impl Database {
             );
             "#,
         )?;
+
+        // Best-effort schema tightening for existing databases.
+        let _ = conn.execute("ALTER TABLE activities ALTER COLUMN duration_s TYPE REAL", []);
+        let _ = conn.execute("ALTER TABLE activities ALTER COLUMN distance_m TYPE REAL", []);
+        let _ = conn.execute("ALTER TABLE records ALTER COLUMN latitude TYPE DOUBLE", []);
+        let _ = conn.execute("ALTER TABLE records ALTER COLUMN longitude TYPE DOUBLE", []);
+        let _ = conn.execute("ALTER TABLE records ALTER COLUMN altitude_m TYPE REAL", []);
+        let _ = conn.execute("ALTER TABLE records ALTER COLUMN distance_m TYPE REAL", []);
+        let _ = conn.execute("ALTER TABLE records ALTER COLUMN speed_m_s TYPE REAL", []);
+        let _ = conn.execute("ALTER TABLE records ALTER COLUMN temperature_c TYPE REAL", []);
         Ok(())
     }
 
@@ -132,6 +142,7 @@ impl Database {
         Ok(deleted)
     }
 
+    #[cfg(all(feature = "web", not(feature = "tauri-app")))]
     pub fn session_valid(&self, token: &str) -> Result<bool> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare(
@@ -141,6 +152,7 @@ impl Database {
         Ok(count > 0)
     }
 
+    #[cfg(all(feature = "web", not(feature = "tauri-app")))]
     pub fn delete_session(&self, token: &str) -> Result<()> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         conn.execute("DELETE FROM sessions WHERE token = ?1", params![token])?;
@@ -160,6 +172,9 @@ impl Database {
             r.get(0)
         })?;
 
+        let duration_s = round_6_to_f32(p.duration_s);
+        let distance_m = round_6_to_f32(p.distance_m);
+
         conn.execute(
             "INSERT INTO activities (id, file_hash, file_name, activity_name, sport, device, start_ts_utc, end_ts_utc, duration_s, distance_m, source, metadata_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
@@ -172,9 +187,9 @@ impl Database {
                 p.device,
                 p.start_ts_utc,
                 p.end_ts_utc,
-                p.duration_s,
-                p.distance_m,
-                "fit",
+                duration_s,
+                distance_m,
+                p.source_format,
                 p.metadata_json
             ],
         )?;
@@ -300,21 +315,35 @@ impl Database {
 }
 
 fn insert_record(stmt: &mut duckdb::Statement<'_>, activity_id: i64, r: RecordPoint) -> Result<()> {
+    // Keep max available precision for coordinates.
+    let latitude = r.latitude;
+    let longitude = r.longitude;
+    // Keep up to 6 decimals for remaining high-cardinality numeric telemetry fields.
+    let altitude_m = r.altitude_m.map(round_6_to_f32);
+    let distance_m = r.distance_m.map(round_6_to_f32);
+    let speed_m_s = r.speed_m_s.map(round_6_to_f32);
+    let temperature_c = r.temperature_c.map(round_6_to_f32);
+    let cadence = r.cadence;
+
     stmt.execute(params![
         activity_id,
         r.timestamp_ms,
-        r.latitude,
-        r.longitude,
-        r.altitude_m,
-        r.distance_m,
-        r.speed_m_s,
-        r.cadence,
+        latitude,
+        longitude,
+        altitude_m,
+        distance_m,
+        speed_m_s,
+        cadence,
         r.heart_rate,
         r.power,
-        r.temperature_c,
+        temperature_c,
         "{}"
     ])?;
     Ok(())
+}
+
+fn round_6_to_f32(value: f64) -> f32 {
+    (((value as f32) * 1_000_000.0).round()) / 1_000_000.0
 }
 
 impl Database {
@@ -380,6 +409,7 @@ impl Database {
         Ok(())
     }
 
+    #[cfg(all(feature = "web", not(feature = "tauri-app")))]
     pub fn delete_setting(&self, key: &str) -> Result<()> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;

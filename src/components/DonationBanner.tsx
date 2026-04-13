@@ -4,7 +4,7 @@ type Props = {
   supporterBadge: boolean;
   donationDismissed: boolean;
   onDismiss: () => void;
-  onActivate: () => void;
+  onActivate: (code: string) => Promise<boolean> | boolean;
 };
 
 export function DonationBanner({ supporterBadge, donationDismissed, onDismiss, onActivate }: Props) {
@@ -20,7 +20,7 @@ export function DonationBanner({ supporterBadge, donationDismissed, onDismiss, o
     if (!codeInput.trim()) return;
     setVerifying(true);
     setErrorMsg("");
-    const success = await (onActivate as any)(codeInput);
+    const success = await onActivate(codeInput);
     setVerifying(false);
     if (!success) {
       setErrorMsg("Invalid code. Please try again.");

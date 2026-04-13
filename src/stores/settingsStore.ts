@@ -3,14 +3,12 @@ import { api } from "../lib/api";
 
 type Theme = "light" | "dark";
 type DistanceUnit = "km" | "mi";
-type DateFormat = "locale" | "iso";
 type TimeFormat = "12h" | "24h";
 export type MapStyle = "default" | "openstreet" | "topo" | "satellite";
 
 type SettingsState = {
   theme: Theme;
   distanceUnit: DistanceUnit;
-  dateFormat: DateFormat;
   timeFormat: TimeFormat;
   mapStyle: MapStyle;
   supporterBadge: boolean;
@@ -20,7 +18,6 @@ type SettingsState = {
   toggleSettings: () => void;
   setTheme: (theme: Theme) => void;
   setDistanceUnit: (unit: DistanceUnit) => void;
-  setDateFormat: (format: DateFormat) => void;
   setTimeFormat: (format: TimeFormat) => void;
   setMapStyle: (style: MapStyle) => void;
   loadSupporterStatus: () => Promise<void>;
@@ -34,7 +31,6 @@ const STORAGE_KEY = "fitDashboard.settings";
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   theme: "light",
   distanceUnit: "km",
-  dateFormat: "locale",
   timeFormat: "24h",
   mapStyle: "default",
   supporterBadge: false,
@@ -49,7 +45,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({
         theme: parsed.theme ?? "light",
         distanceUnit: parsed.distanceUnit ?? "km",
-        dateFormat: parsed.dateFormat ?? "locale",
         timeFormat: parsed.timeFormat ?? "24h",
         mapStyle: parsed.mapStyle ?? "default",
       });
@@ -67,11 +62,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setDistanceUnit: (distanceUnit) => {
     set({ distanceUnit });
-    persist(get());
-  },
-
-  setDateFormat: (dateFormat) => {
-    set({ dateFormat });
     persist(get());
   },
 
@@ -136,7 +126,6 @@ function persist(state: SettingsState) {
     JSON.stringify({
       theme: state.theme,
       distanceUnit: state.distanceUnit,
-      dateFormat: state.dateFormat,
       timeFormat: state.timeFormat,
       mapStyle: state.mapStyle,
     })

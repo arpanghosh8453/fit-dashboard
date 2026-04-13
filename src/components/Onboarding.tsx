@@ -9,9 +9,11 @@ export function Onboarding({ onSubmit }: Props) {
   const [password, setPassword] = useState("");
   const [verifyPassword, setVerifyPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!username.trim()) {
       setError("Username is required.");
       return;
@@ -25,7 +27,14 @@ export function Onboarding({ onSubmit }: Props) {
       return;
     }
     setError(null);
-    await onSubmit(username, password);
+    setIsSubmitting(true);
+    try {
+      await onSubmit(username, password);
+    } catch {
+      setError("Could not create account right now. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -57,7 +66,10 @@ export function Onboarding({ onSubmit }: Props) {
           autoComplete="new-password"
         />
         {error && <div className="error">{error}</div>}
-        <button type="submit">Create Account</button>
+        <button type="submit" disabled={isSubmitting || !username.trim() || !password || !verifyPassword}>
+          {isSubmitting ? <span className="btn-spinner" aria-hidden="true" /> : null}
+          {isSubmitting ? "Creating..." : "Create Account"}
+        </button>
       </form>
     </div>
   );

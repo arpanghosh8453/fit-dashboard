@@ -14,6 +14,7 @@ fitparser = "0.8"
 hex = "0.4"
 rand = "0.8"
 reverse_geocoder = "4.1.1"
+roxmltree = "0.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
@@ -22,10 +23,11 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tauri = { version = "2", optional = true }
+tauri = { version = "2", optional = true , features = [] }
+tauri-plugin-dialog = { version = "2", optional = true }
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 # Optional desktop mode
 # tauri and tauri-plugin-shell can be enabled if you want to compile desktop binaries immediately.
@@ -33,4 +35,4 @@ tauri-build = "2"
 [features]
 default = ["web"]
 web = []
-tauri-app = ["dep:tauri"]
+tauri-app = ["dep:tauri", "dep:tauri-plugin-dialog"]

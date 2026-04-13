@@ -19,5 +19,10 @@
         "resizable": true
       }
     ]
+  },
+  "bundle": {
+    "icon": [
+      "icons/icon.svg"
+    ]
   }
 }

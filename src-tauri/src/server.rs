@@ -13,7 +13,7 @@ use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer};
 
 use crate::{
     auth::{create_session, hash_password, verify_password},
-    fit_parser::parse_fit_bytes,
+    fit_parser::parse_activity_bytes,
     models::{Credentials, RenameActivityPayload, TokenResponse, UnlockPayload},
     state::AppState,
 };
@@ -177,14 +177,14 @@ async fn import_fit(
         }
 
         let file_name = field.file_name().unwrap_or("activity.fit").to_string();
-        tracing::info!(file_name = %file_name, "processing FIT upload");
+        tracing::info!(file_name = %file_name, "processing activity upload");
         let bytes = field.bytes().await.map_err(|_| {
             (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({ "error": "failed reading upload bytes" })),
             )
         })?;
-        let parsed = parse_fit_bytes(&file_name, &bytes).map_err(|e| {
+        let parsed = parse_activity_bytes(&file_name, &bytes).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({ "error": format!("parse failed: {e}") })),
@@ -212,7 +212,7 @@ async fn import_fit(
                 )
             })?
         {
-            tracing::info!(file_name = %file_name, file_hash = %parsed.file_hash, "duplicate FIT upload skipped");
+            tracing::info!(file_name = %file_name, file_hash = %parsed.file_hash, "duplicate activity upload skipped");
             return Ok(Json(serde_json::json!({ "status": "duplicate" })));
         }
 
@@ -225,6 +225,7 @@ async fn import_fit(
                 )
             })?;
 
+        let source_format = parsed.source_format.clone();
         let id = state
             .db
             .insert_activity(parsed)
@@ -234,7 +235,7 @@ async fn import_fit(
                     Json(serde_json::json!({ "error": "failed inserting activity" })),
                 )
             })?;
-        tracing::info!(activity_id = id, file_name = %file_name, "FIT upload imported successfully");
+        tracing::info!(activity_id = id, file_name = %file_name, source_format = %source_format, "activity upload imported successfully");
         return Ok(Json(serde_json::json!({ "status": "ok", "activity_id": id })));
     }
 
@@ -364,7 +365,7 @@ async fn sync_fit_files(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     {
         let path = entry.path();
-        if !is_fit_file(&path) {
+        if !is_supported_activity_file(&path) {
             continue;
         }
 
@@ -405,9 +406,9 @@ async fn sync_fit_files(
         let file_name = path
             .file_name()
             .and_then(|s| s.to_str())
-            .unwrap_or("activity.fit")
+            .unwrap_or("activity")
             .to_string();
-        match parse_fit_bytes(&file_name, &bytes)
+        match parse_activity_bytes(&file_name, &bytes)
             .and_then(|parsed| state.db.insert_activity(parsed).map(|_| ()))
         {
             Ok(_) => summary.imported += 1,
@@ -625,10 +626,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn is_fit_file(path: &FsPath) -> bool {
+fn is_supported_activity_file(path: &FsPath) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("fit"))
+        .map(|e| {
+            e.eq_ignore_ascii_case("fit")
+                || e.eq_ignore_ascii_case("tcx")
+                || e.eq_ignore_ascii_case("gpx")
+        })
         .unwrap_or(false)
 }
 

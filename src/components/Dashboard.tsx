@@ -1,4 +1,4 @@
-import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { DragEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useActivityStore } from "../stores/activityStore";
 import { ActivityChart } from "./ActivityChart";
 import { ActivityMap } from "./ActivityMap";
@@ -9,9 +9,12 @@ import { DateRange } from "react-day-picker";
 import { DonationBanner } from "./DonationBanner";
 import { SettingsPanel } from "./SettingsPanel";
 import { api } from "../lib/api";
+import { isTauri } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { exportSingleActivity, exportBulkActivities, type ExportFormat, type BulkExportProgress } from "../lib/exportUtils";
 import { useSettingsStore } from "../stores/settingsStore";
 import type { Activity, RecordPoint } from "../types";
+import appIcon from "../assets/app-icon.svg";
 
 type Props = { onLogout: () => Promise<void> };
 
@@ -31,6 +34,10 @@ function formatDurationShort(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60);
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+function isTauriRuntime(): boolean {
+  return isTauri();
 }
 
 function computeRecordStats(records: RecordPoint[]) {
@@ -100,6 +107,14 @@ function IconAvg() {
 }
 function IconSearch() {
   return <svg width="14" height="14" viewBox="0 0 24 24" {...svgProps}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>;
+}
+function IconSort() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" {...svgProps}><line x1="6" y1="7" x2="18" y2="7" /><line x1="9" y1="12" x2="18" y2="12" /><line x1="12" y1="17" x2="18" y2="17" /></svg>;
+}
+function IconSortDirection({ direction }: { direction: "asc" | "desc" }) {
+  return direction === "asc"
+    ? <svg width="14" height="14" viewBox="0 0 24 24" {...svgProps}><polyline points="7 11 12 6 17 11" /><line x1="12" y1="18" x2="12" y2="7" /></svg>
+    : <svg width="14" height="14" viewBox="0 0 24 24" {...svgProps}><polyline points="7 13 12 18 17 13" /><line x1="12" y1="6" x2="12" y2="17" /></svg>;
 }
 function IconMenu() {
   return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /></svg>;
@@ -176,8 +191,8 @@ export function Dashboard({ onLogout }: Props) {
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [minDurationHours, setMinDurationHours] = useState("");
-  const [maxDurationHours, setMaxDurationHours] = useState("");
+  const [minDurationMinutes, setMinDurationMinutes] = useState("");
+  const [maxDurationMinutes, setMaxDurationMinutes] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
   const [datePickerFromOpen, setDatePickerFromOpen] = useState(false);
@@ -185,13 +200,19 @@ export function Dashboard({ onLogout }: Props) {
   const dateFromBtnRef = useRef<HTMLButtonElement>(null);
   const dateToBtnRef = useRef<HTMLButtonElement>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [forceBrowserPicker, setForceBrowserPicker] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"date" | "name" | "duration">("date");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [isSortOpen, setIsSortOpen] = useState(false);
   const [overviewRecords, setOverviewRecords] = useState<RecordPoint[]>([]);
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; activityId: number; activityName: string;
   } | null>(null);
+  const [telemetryZoom, setTelemetryZoom] = useState<{ start: number; end: number } | null>(null);
 
   // Inline rename/delete state
   const [renameTarget, setRenameTarget] = useState<{ id: number; name: string } | null>(null);
@@ -203,13 +224,13 @@ export function Dashboard({ onLogout }: Props) {
     filterSport, setFilterSport, selectActivity, refresh
   } = useActivityStore();
   const {
-    distanceUnit, dateFormat, timeFormat, supporterBadge, donationDismissed,
+    distanceUnit, timeFormat, supporterBadge, donationDismissed,
     toggleSettings, setTheme, mapStyle, setMapStyle,
     verifySupporterCode, dismissDonationBanner, loadSupporterStatus, theme,
   } = useSettingsStore();
 
   useEffect(() => {
-    const close = () => { setContextMenu(null); setBulkExportDropdownOpen(false); };
+    const close = () => { setContextMenu(null); setBulkExportDropdownOpen(false); setIsSortOpen(false); };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, []);
@@ -226,8 +247,8 @@ export function Dashboard({ onLogout }: Props) {
   }
 
   const filtered = useMemo(() => {
-    const minSec = minDurationHours ? Number(minDurationHours) * 3600 : null;
-    const maxSec = maxDurationHours ? Number(maxDurationHours) * 3600 : null;
+    const minSec = minDurationMinutes ? Number(minDurationMinutes) * 60 : null;
+    const maxSec = maxDurationMinutes ? Number(maxDurationMinutes) * 60 : null;
     const fromTs = dateFrom ? dateFrom.getTime() : null;
     const toTs = dateTo ? (dateTo.getTime() + 86399999) : null;
 
@@ -246,7 +267,26 @@ export function Dashboard({ onLogout }: Props) {
       if (maxSec !== null && Number.isFinite(maxSec) && a.duration_s > maxSec) return false;
       return true;
     });
-  }, [activities, filterSport, minDurationHours, maxDurationHours, dateFrom, dateTo, searchQuery]);
+  }, [activities, filterSport, minDurationMinutes, maxDurationMinutes, dateFrom, dateTo, searchQuery]);
+
+  const sortedForList = useMemo(() => {
+    const list = [...filtered];
+    list.sort((a, b) => {
+      if (sortBy === "name") {
+        const cmp = (a.activity_name || a.file_name).localeCompare(b.activity_name || b.file_name, undefined, { sensitivity: "base" });
+        return sortDirection === "asc" ? cmp : -cmp;
+      }
+      if (sortBy === "duration") {
+        return sortDirection === "asc" ? a.duration_s - b.duration_s : b.duration_s - a.duration_s;
+      }
+      const aTs = parseUtcDate(a.start_ts_utc).getTime();
+      const bTs = parseUtcDate(b.start_ts_utc).getTime();
+      const aSafe = Number.isFinite(aTs) ? aTs : 0;
+      const bSafe = Number.isFinite(bTs) ? bTs : 0;
+      return sortDirection === "asc" ? aSafe - bSafe : bSafe - aSafe;
+    });
+    return list;
+  }, [filtered, sortBy, sortDirection]);
 
   useEffect(() => {
     if (tab !== "overview") return;
@@ -287,20 +327,13 @@ export function Dashboard({ onLogout }: Props) {
   function formatDate(input: string): string {
     const date = parseUtcDate(input);
     if (Number.isNaN(date.getTime())) return input;
-    if (dateFormat === "iso") {
-      return date.toLocaleString("sv-SE", {
-        year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", second: "2-digit",
-        hour12: timeFormat === "12h",
-      });
-    }
-    return date.toLocaleString(undefined, { hour12: timeFormat === "12h" });
+    return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }).replace(/^(\d{2}\s+[A-Za-z]{3})\s+(\d{4})$/, "$1, $2");
   }
 
   function formatDateShort(input: string): string {
     const date = parseUtcDate(input);
     if (Number.isNaN(date.getTime())) return input;
-    return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+    return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }).replace(/^(\d{2}\s+[A-Za-z]{3})\s+(\d{4})$/, "$1, $2");
   }
 
   function formatTimeShort(input: string): string {
@@ -309,10 +342,97 @@ export function Dashboard({ onLogout }: Props) {
     return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: timeFormat === "12h" });
   }
 
+  async function importFromPaths(paths: string[]) {
+    if (!paths.length || isImporting || isSyncing) return;
+    const validPaths = paths.filter((p) => {
+      const lower = p.toLowerCase();
+      return lower.endsWith(".fit") || lower.endsWith(".tcx") || lower.endsWith(".gpx");
+    });
+    if (!validPaths.length) {
+      setImportMessage("No supported files selected (.fit, .tcx, .gpx).");
+      return;
+    }
+
+    setIsImporting(true);
+    let imported = 0, duplicates = 0, failed = 0;
+    for (let i = 0; i < validPaths.length; i++) {
+      const path = validPaths[i];
+      const fileName = path.split(/[\\/]/).pop() ?? path;
+      setImportMessage(`Processing ${i + 1}/${validPaths.length}: ${fileName}`);
+      try {
+        const result: any = await api.importActivityPath(path);
+        if (result?.status === "duplicate") duplicates++; else imported++;
+      } catch (err) {
+        failed++;
+        setImportMessage(`Failed on ${fileName}: ${err instanceof Error ? err.message : "unknown"}`);
+      }
+    }
+
+    let refreshError: string | null = null;
+    try {
+      await refresh();
+    } catch (err) {
+      refreshError = err instanceof Error ? err.message : "unknown";
+    }
+    setIsImporting(false);
+    if (refreshError) {
+      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}. Refresh failed: ${refreshError}`);
+    } else {
+      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}.`);
+    }
+  }
+
+  function parseDroppedFileUris(raw: string): string[] {
+    return raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .map((line) => {
+        if (line.startsWith("file://")) {
+          try {
+            return decodeURIComponent(line.replace(/^file:\/\//, ""));
+          } catch {
+            return line.replace(/^file:\/\//, "");
+          }
+        }
+        return line;
+      });
+  }
+
+  async function handleImportDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
+    if (isImporting || isSyncing) return;
+
+    const fileList = e.dataTransfer.files;
+    if (fileList && fileList.length > 0) {
+      setForceBrowserPicker(false);
+      await importBatch(fileList);
+      return;
+    }
+
+    if (!isTauriRuntime()) {
+      setImportMessage("No supported files dropped (.fit, .tcx, .gpx).");
+      return;
+    }
+
+    const uriList = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+    if (!uriList) {
+      setImportMessage("No supported files dropped (.fit, .tcx, .gpx).");
+      return;
+    }
+    const paths = parseDroppedFileUris(uriList);
+    await importFromPaths(paths);
+  }
+
   async function importBatch(fileList: FileList | null) {
     if (!fileList || fileList.length === 0 || isImporting) return;
-    const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith(".fit"));
-    if (!files.length) { setImportMessage("No FIT files selected."); return; }
+    const files = Array.from(fileList).filter((f) => {
+      const name = f.name.toLowerCase();
+      return name.endsWith(".fit") || name.endsWith(".tcx") || name.endsWith(".gpx");
+    });
+    if (!files.length) { setImportMessage("No supported files selected (.fit, .tcx, .gpx)."); return; }
     setIsImporting(true);
     let imported = 0, duplicates = 0, failed = 0;
     for (let i = 0; i < files.length; i++) {
@@ -337,6 +457,33 @@ export function Dashboard({ onLogout }: Props) {
     } else {
       setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}.`);
     }
+  }
+
+  async function importFromDesktopDialog() {
+    if (isImporting || isSyncing) return;
+    setForceBrowserPicker(false);
+    let picked: string | string[] | null = null;
+    try {
+      picked = await open({
+        multiple: true,
+        filters: [
+          { name: "Activity logs", extensions: ["fit", "FIT", "tcx", "TCX", "gpx", "GPX"] },
+          { name: "FIT", extensions: ["fit", "FIT"] },
+          { name: "TCX", extensions: ["tcx", "TCX"] },
+          { name: "GPX", extensions: ["gpx", "GPX"] },
+        ],
+      });
+    } catch (err) {
+      setForceBrowserPicker(true);
+      setImportMessage(
+        `Native file picker unavailable (${err instanceof Error ? err.message : "unknown"}). Click Select files again to use browser picker.`
+      );
+      return;
+    }
+    if (!picked) return;
+
+    const paths = Array.isArray(picked) ? picked : [picked];
+    await importFromPaths(paths);
   }
 
   async function syncFromStorage() {
@@ -386,14 +533,16 @@ export function Dashboard({ onLogout }: Props) {
 
   async function confirmDelete() {
     if (deleteTarget === null) return;
-    await api.deleteActivity(deleteTarget);
-    if (selectedActivity?.id === deleteTarget) await selectActivity(null);
     try {
+      await api.deleteActivity(deleteTarget);
+      if (selectedActivity?.id === deleteTarget) await selectActivity(null);
       await refresh();
-    } catch {
-      // Keep UI responsive even if backend is briefly unavailable.
+    } catch (err) {
+      setImportMessage(`Delete failed: ${err instanceof Error ? err.message : "unknown"}`);
+      return;
     }
     setDeleteTarget(null);
+    setImportMessage("Activity deleted.");
   }
 
   function onItemContextMenu(e: MouseEvent, activity: Activity) {
@@ -442,11 +591,15 @@ export function Dashboard({ onLogout }: Props) {
     setIsBulkDeleting(true);
     setConfirmBulkDelete(false);
     const total = filtered.length;
+    let failed = 0;
+    const failedReasons: string[] = [];
     for (let i = 0; i < filtered.length; i++) {
       setBulkDeleteProgress({ done: i, total });
       try {
         await api.deleteActivity(filtered[i].id);
       } catch (err) {
+        failed++;
+        failedReasons.push(err instanceof Error ? err.message : "unknown");
         console.error(`Failed to delete activity ${filtered[i].id}:`, err);
       }
     }
@@ -457,15 +610,20 @@ export function Dashboard({ onLogout }: Props) {
     await refresh();
     setIsBulkDeleting(false);
     setBulkDeleteProgress(null);
+    setImportMessage(
+      failed > 0
+        ? `Bulk delete finished with ${failed} failure(s): ${failedReasons.slice(0, 2).join(" | ")}`
+        : "Bulk delete completed."
+    );
   }
 
   function clearFilters() {
     setDateFrom(undefined); setDateTo(undefined);
-    setMinDurationHours(""); setMaxDurationHours("");
+    setMinDurationMinutes(""); setMaxDurationMinutes("");
     setFilterSport("all"); setSearchQuery("");
   }
 
-  const hasFilters = filterSport !== "all" || dateFrom || dateTo || minDurationHours || maxDurationHours || searchQuery;
+  const hasFilters = filterSport !== "all" || dateFrom || dateTo || minDurationMinutes || maxDurationMinutes || searchQuery;
 
   return (
     <div className="app-shell">
@@ -476,13 +634,13 @@ export function Dashboard({ onLogout }: Props) {
             <IconMenu />
           </button>
           <div className="brand">
-            <div className="brand-icon">F</div>
+            <div className="brand-icon"><img src={appIcon} alt="FIT Dashboard" className="brand-icon-img" /></div>
             <div className="brand-text">
               <h1>
                 FIT Dashboard
                 {supporterBadge && <span className="supporter-badge-inline" title="Supporter Badge Active">Supporter</span>}
               </h1>
-              <span>Performance Suite</span>
+              <span>Workout log Analytics</span>
             </div>
           </div>
         </div>
@@ -528,29 +686,61 @@ export function Dashboard({ onLogout }: Props) {
 
             {/* Import */}
             <section className="sidebar-section">
-              <button className={`section-header ${isImportOpen ? "open" : ""}`} onClick={() => {
+              <button className={`section-header ${isImportOpen ? "open" : ""} ${isImporting ? "active" : ""}`} onClick={() => {
                 setIsImportOpen((v) => {
                   const next = !v;
                   if (next) setIsFilterOpen(false);
                   return next;
                 });
               }}>
-                <span>Import FIT Files</span>
-                <span className="chevron"><IconChevron /></span>
+                <span className="section-title">{isImporting ? "Importing..." : "Import Activity Files"}</span>
+                <span className="section-header-right"><span className="chevron"><IconChevron /></span></span>
               </button>
               {isImportOpen && (
                 <div className="section-body">
-                  <div className="import-zone">
-                    <input ref={fileInputRef} type="file" accept=".fit,.FIT" multiple hidden onChange={(e) => { void importBatch(e.target.files); e.currentTarget.value = ""; }} />
+                  <div
+                    className={`import-zone import-dropzone ${isDragActive ? "drag-active" : ""}`}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!isImporting && !isSyncing) setIsDragActive(true);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!isImporting && !isSyncing) setIsDragActive(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const next = e.relatedTarget as Node | null;
+                      if (!next || !e.currentTarget.contains(next)) {
+                        setIsDragActive(false);
+                      }
+                    }}
+                    onDrop={(e) => { void handleImportDrop(e); }}
+                  >
+                    <input ref={fileInputRef} type="file" accept=".fit,.FIT,.tcx,.TCX,.gpx,.GPX" multiple hidden onChange={(e) => { setForceBrowserPicker(false); void importBatch(e.target.files); e.currentTarget.value = ""; }} />
+                    <div className="import-drop-label">Drag and drop .fit, .tcx, .gpx files here</div>
                     <div className="import-actions">
-                      <button className="import-btn" onClick={() => fileInputRef.current?.click()} disabled={isImporting || isSyncing}>
-                        {isImporting ? "Importing..." : "Select FIT files"}
+                      <button
+                        className="import-btn"
+                        onClick={() => {
+                          if (isTauriRuntime() && !forceBrowserPicker) {
+                            void importFromDesktopDialog();
+                          } else {
+                            fileInputRef.current?.click();
+                          }
+                        }}
+                        disabled={isImporting || isSyncing}
+                      >
+                        {isImporting ? "Importing..." : "Select files (.fit/.tcx/.gpx)"}
                       </button>
                       <button className="btn-secondary import-sync-btn" onClick={() => void syncFromStorage()} disabled={isImporting || isSyncing}>
                         <IconRefresh /> {isSyncing ? "Syncing..." : "Sync"}
                       </button>
                     </div>
-                    <span className="import-hint">Batch queue runs sequentially for stability.</span>
+                    <span className="import-hint">Drop files here or use Select files. Batch queue runs sequentially for stability.</span>
                   </div>
                 </div>
               )}
@@ -558,15 +748,32 @@ export function Dashboard({ onLogout }: Props) {
 
             {/* Filters */}
             <section className="sidebar-section">
-              <button className={`section-header ${isFilterOpen ? "open" : ""}`} onClick={() => {
+              <button className={`section-header ${isFilterOpen ? "open" : ""} ${hasFilters ? "active" : ""}`} onClick={() => {
                 setIsFilterOpen((v) => {
                   const next = !v;
                   if (next) setIsImportOpen(false);
                   return next;
                 });
               }}>
-                <span>Filters</span>
-                <span className="chevron"><IconChevron /></span>
+                <span className="section-title-with-action">
+                  <span className="section-title">{hasFilters ? "Filter Active" : "Filters"}</span>
+                  {hasFilters && (
+                    <button
+                      type="button"
+                      className="section-header-reset"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        clearFilters();
+                      }}
+                      aria-label="Reset filters"
+                      title="Reset filters"
+                    >
+                      <IconX />
+                    </button>
+                  )}
+                </span>
+                <span className="section-header-right"><span className="chevron"><IconChevron /></span></span>
               </button>
               {isFilterOpen && (
                 <div className="section-body">
@@ -617,11 +824,11 @@ export function Dashboard({ onLogout }: Props) {
                       </div>
                     </label>
                     <label>
-                      Duration (hours)
+                      Duration (minutes)
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
-                        <input style={{ minWidth: 0 }} type="number" min="0" step="0.25" placeholder="Min" value={minDurationHours} onChange={(e) => setMinDurationHours(e.target.value)} />
+                        <input style={{ minWidth: 0 }} type="number" min="0" step="1" placeholder="Min" value={minDurationMinutes} onChange={(e) => setMinDurationMinutes(e.target.value)} />
                         <span style={{ color: "var(--text-muted)" }}>—</span>
-                        <input style={{ minWidth: 0 }} type="number" min="0" step="0.25" placeholder="Max" value={maxDurationHours} onChange={(e) => setMaxDurationHours(e.target.value)} />
+                        <input style={{ minWidth: 0 }} type="number" min="0" step="1" placeholder="Max" value={maxDurationMinutes} onChange={(e) => setMaxDurationMinutes(e.target.value)} />
                       </div>
                     </label>
                     <div className="filter-actions"><button className="btn-secondary" style={{ flex: 1 }} onClick={clearFilters}>Reset</button></div>
@@ -633,7 +840,36 @@ export function Dashboard({ onLogout }: Props) {
             {importMessage && <div className="import-message">{importMessage}</div>}
 
             <div className="sidebar-search">
-              <input id="sidebar-search-input" placeholder="Search by name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+              <div className="sidebar-search-row">
+                <input id="sidebar-search-input" placeholder="Search by name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                <div className="sidebar-sort-controls" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="sidebar-sort-btn"
+                    type="button"
+                    onClick={() => setIsSortOpen((open) => !open)}
+                    aria-label={`Sort activities by ${sortBy}`}
+                    title="Sort"
+                  >
+                    <IconSort />
+                  </button>
+                  <button
+                    className="sidebar-sort-btn direction"
+                    type="button"
+                    onClick={() => setSortDirection((dir) => (dir === "asc" ? "desc" : "asc"))}
+                    aria-label={`Toggle sort direction: ${sortDirection === "asc" ? "ascending" : "descending"}`}
+                    title={sortDirection === "asc" ? "Ascending" : "Descending"}
+                  >
+                    <IconSortDirection direction={sortDirection} />
+                  </button>
+                  {isSortOpen && (
+                    <div className="sidebar-sort-dropdown">
+                      <button type="button" className={sortBy === "date" ? "active" : ""} onClick={() => { setSortBy("date"); setIsSortOpen(false); }}>Date</button>
+                      <button type="button" className={sortBy === "name" ? "active" : ""} onClick={() => { setSortBy("name"); setIsSortOpen(false); }}>Name</button>
+                      <button type="button" className={sortBy === "duration" ? "active" : ""} onClick={() => { setSortBy("duration"); setIsSortOpen(false); }}>Duration</button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="log-count">
@@ -672,7 +908,7 @@ export function Dashboard({ onLogout }: Props) {
             {/* Activity List */}
             <div className="activity-list-box">
               <div className="activity-list">
-                {filtered.map((a) => {
+                {sortedForList.map((a) => {
                 const isRenaming = renameTarget?.id === a.id;
                 const isDeleting = deleteTarget === a.id;
                 const isActive = selectedActivity?.id === a.id;
@@ -823,6 +1059,9 @@ export function Dashboard({ onLogout }: Props) {
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
                     {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
                     {selectedActivity.device && <span className="badge device">{selectedActivity.device}</span>}
+                    <button className="btn-secondary" style={{ padding: "0.25rem 0.55rem", fontSize: "0.74rem" }} onClick={() => setTelemetryZoom(null)}>
+                      Reset Zoom
+                    </button>
                   </div>
                 </div>
                 <div className="detail-stats-strip">
@@ -836,10 +1075,10 @@ export function Dashboard({ onLogout }: Props) {
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>Telemetry Data</h3><ActivityChart records={selectedRecords} theme={theme} /></div>
+                <div className="panel"><h3>Telemetry Data</h3><ActivityChart records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} /></div>
                 <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} />
               </div>
-              <ActivityInsights records={selectedRecords} theme={theme} />
+              <ActivityInsights records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} />
             </>
           ) : (
             <div className="empty-state">

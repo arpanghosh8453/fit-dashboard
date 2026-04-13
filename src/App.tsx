@@ -5,6 +5,7 @@ import { UnlockScreen } from "./components/UnlockScreen";
 import { Dashboard } from "./components/Dashboard";
 import { useActivityStore } from "./stores/activityStore";
 import { useSettingsStore } from "./stores/settingsStore";
+import appIcon from "./assets/app-icon.svg";
 
 type Screen = "loading" | "onboarding" | "unlock" | "dashboard";
 
@@ -73,7 +74,19 @@ export function App() {
         </div>
       );
     }
-    return <div className="center-screen">Loading...</div>;
+    return (
+      <div className="center-screen">
+        <div className="loading-splash" role="status" aria-live="polite" aria-label="Loading application">
+          <div className="loading-orbit" aria-hidden="true">
+            <span className="ring ring-1" />
+            <span className="ring ring-2" />
+            <span className="ring ring-3" />
+            <span className="loading-core"><img src={appIcon} alt="FIT Dashboard" className="loading-core-img" /></span>
+          </div>
+          <div className="loading-label">Loading dashboard...</div>
+        </div>
+      </div>
+    );
   }
 
   if (screen === "onboarding") {
