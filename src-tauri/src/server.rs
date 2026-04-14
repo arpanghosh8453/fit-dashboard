@@ -43,7 +43,11 @@ pub fn app(state: AppState) -> Router {
         .route("/api/logout", post(logout))
         .route("/api/import-fit", post(import_fit))
         .route("/api/sync-fit-files", post(sync_fit_files))
+        .route("/api/sync-fit-files/list", get(list_sync_files))
+        .route("/api/sync-fit-files/process", post(process_sync_file))
         .route("/api/storage-info", get(get_storage_info))
+        .route("/api/blacklist/count", get(get_blacklisted_hash_count))
+        .route("/api/blacklist/clear", post(clear_blacklisted_hashes))
         .route("/api/activities", get(list_activities))
         .route("/api/activities/{id}", patch(rename_activity).delete(delete_activity))
         .route("/api/overview", get(overview))
@@ -445,6 +449,87 @@ async fn sync_fit_files(
     Ok(Json(serde_json::json!(summary)))
 }
 
+async fn list_sync_files(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    ensure_session(&state, &headers)?;
+    let mut files = Vec::new();
+    let mut dir = tokio::fs::read_dir(&state.storage.fit_files_dir)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    while let Some(entry) = dir
+        .next_entry()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    {
+        let path = entry.path();
+        if is_supported_activity_file(&path) {
+            files.push(path.to_string_lossy().to_string());
+        }
+    }
+
+    files.sort();
+    Ok(Json(serde_json::json!(files)))
+}
+
+#[derive(Deserialize)]
+struct SyncFilePayload {
+    path: String,
+}
+
+async fn process_sync_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<SyncFilePayload>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    ensure_session(&state, &headers)?;
+    let path = std::path::Path::new(&payload.path);
+    if !is_supported_activity_file(path) {
+        return Ok(Json(serde_json::json!({ "status": "ignored", "file": payload.path })));
+    }
+
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("activity")
+        .to_string();
+
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let hash = sha256_hex(&bytes);
+
+    match state.db.is_hash_blacklisted(&hash) {
+        Ok(true) => {
+            tracing::info!(file = %file_name, "sync file skipped: blacklisted");
+            return Ok(Json(serde_json::json!({ "status": "blacklisted", "file": file_name })));
+        }
+        Ok(false) => {}
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+
+    match state.db.is_file_imported(&hash) {
+        Ok(true) => {
+            tracing::info!(file = %file_name, "sync file skipped: duplicate");
+            return Ok(Json(serde_json::json!({ "status": "duplicate", "file": file_name })));
+        }
+        Ok(false) => {}
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+
+    let parsed = parse_activity_bytes(&file_name, &bytes)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    state
+        .db
+        .insert_activity(parsed)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::info!(file = %file_name, "sync file imported");
+
+    Ok(Json(serde_json::json!({ "status": "imported", "file": file_name })))
+}
+
 async fn get_storage_info(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -456,6 +541,31 @@ async fn get_storage_info(
         "db_path": state.storage.db_path.clone(),
         "fit_files_dir": state.storage.fit_files_dir.clone()
     })))
+}
+
+async fn clear_blacklisted_hashes(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    ensure_session(&state, &headers)?;
+    let removed = state
+        .db
+        .clear_blacklisted_hashes()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tracing::info!(removed, "clear_blacklisted_hashes completed");
+    Ok(Json(serde_json::json!({ "removed": removed })))
+}
+
+async fn get_blacklisted_hash_count(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    ensure_session(&state, &headers)?;
+    let count = state
+        .db
+        .blacklisted_hash_count()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({ "count": count })))
 }
 
 fn extract_session(state: &AppState, headers: &HeaderMap) -> Result<String, StatusCode> {

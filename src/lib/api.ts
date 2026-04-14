@@ -16,6 +16,14 @@ type SyncSummary = {
   failed: number;
 };
 
+type ClearBlacklistSummary = {
+  removed: number;
+};
+
+type BlacklistCountSummary = {
+  count: number;
+};
+
 const base = (import.meta.env.VITE_API_BASE ?? "http://localhost:8080").replace(/\/$/, "");
 
 const SESSION_KEY = "sessionToken";
@@ -140,11 +148,45 @@ export const api = {
     return res.data;
   },
 
+  async listSyncFiles(): Promise<string[]> {
+    if (isTauriRuntime()) {
+      return invoke<string[]>("list_sync_files");
+    }
+    const res = await webClient.get("/sync-fit-files/list");
+    return res.data;
+  },
+
+  async processSyncFile(path: string): Promise<{ status: "imported" | "duplicate" | "blacklisted" | "ignored"; file: string }> {
+    if (isTauriRuntime()) {
+      return invoke("process_sync_file", { path });
+    }
+    const res = await webClient.post("/sync-fit-files/process", { path });
+    return res.data;
+  },
+
   async getStorageInfo(): Promise<StorageInfo> {
     if (isTauriRuntime()) {
       return invoke<StorageInfo>("get_storage_info");
     }
     const res = await webClient.get("/storage-info");
+    return res.data;
+  },
+
+  async clearBlacklistedHashes(): Promise<ClearBlacklistSummary> {
+    if (isTauriRuntime()) {
+      const removed = await invoke<number>("clear_blacklisted_hashes");
+      return { removed };
+    }
+    const res = await webClient.post("/blacklist/clear");
+    return res.data;
+  },
+
+  async getBlacklistedHashCount(): Promise<BlacklistCountSummary> {
+    if (isTauriRuntime()) {
+      const count = await invoke<number>("get_blacklisted_hash_count");
+      return { count };
+    }
+    const res = await webClient.get("/blacklist/count");
     return res.data;
   },
 

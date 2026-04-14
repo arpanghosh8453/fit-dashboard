@@ -29,16 +29,24 @@ export function SettingsPanel() {
   const [verifying, setVerifying] = useState(false);
   const [codeMsg, setCodeMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
+  const [clearingBlacklist, setClearingBlacklist] = useState(false);
+  const [blacklistMsg, setBlacklistMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [blacklistCount, setBlacklistCount] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (!showSettings) return;
-    void api.getStorageInfo()
-      .then((info) => {
-        if (!cancelled) setStorageInfo(info);
+    void Promise.all([api.getStorageInfo(), api.getBlacklistedHashCount()])
+      .then(([info, count]) => {
+        if (cancelled) return;
+        setStorageInfo(info);
+        setBlacklistCount(count.count);
       })
       .catch(() => {
-        if (!cancelled) setStorageInfo(null);
+        if (!cancelled) {
+          setStorageInfo(null);
+          setBlacklistCount(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -60,6 +68,25 @@ export function SettingsPanel() {
       setCodeInput("");
     } else {
       setCodeMsg({ type: "error", text: "Invalid code. Please try again." });
+    }
+  }
+
+  async function handleClearBlacklist() {
+    const ok = window.confirm("Clear all blacklisted file hashes? Deleted activities will be importable again.");
+    if (!ok) return;
+    setClearingBlacklist(true);
+    setBlacklistMsg(null);
+    try {
+      const result = await api.clearBlacklistedHashes();
+      setBlacklistMsg({ type: "success", text: `Cleared ${result.removed} blacklisted hash(es).` });
+      setBlacklistCount(0);
+    } catch (err) {
+      setBlacklistMsg({
+        type: "error",
+        text: `Failed to clear blacklist: ${err instanceof Error ? err.message : "unknown"}`,
+      });
+    } finally {
+      setClearingBlacklist(false);
     }
   }
 
@@ -161,6 +188,27 @@ export function SettingsPanel() {
           ) : (
             <p className="small">Unable to load storage path details right now.</p>
           )}
+
+          <div style={{ marginTop: "0.7rem", display: "flex", flexDirection: "column", gap: "0.35rem", alignItems: "flex-start" }}>
+            <span className="small">
+              Blacklisted hashes: <strong>{blacklistCount ?? "-"}</strong>
+            </span>
+            <button
+              className="btn-danger"
+              onClick={() => void handleClearBlacklist()}
+              disabled={clearingBlacklist}
+            >
+              {clearingBlacklist ? "Clearing..." : "Clear Blacklist"}
+            </button>
+            {blacklistMsg && (
+              <span
+                className="small"
+                style={{ color: blacklistMsg.type === "success" ? "var(--success)" : "var(--danger)" }}
+              >
+                {blacklistMsg.text}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>

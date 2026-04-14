@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::{
     auth::{create_session, hash_password, verify_password},
@@ -21,6 +21,25 @@ struct SyncSummary {
     duplicates: usize,
     blacklisted: usize,
     failed: usize,
+}
+
+#[derive(Clone, Serialize)]
+struct SyncProgressEvent {
+    current_file: Option<String>,
+    processed: usize,
+    total: usize,
+    scanned: usize,
+    imported: usize,
+    duplicates: usize,
+    blacklisted: usize,
+    failed: usize,
+    done: bool,
+}
+
+fn emit_sync_progress(app: &tauri::AppHandle, payload: SyncProgressEvent) {
+    if let Err(err) = app.emit("sync_progress", payload) {
+        tracing::warn!(error = %err, "failed emitting sync_progress event");
+    }
 }
 
 pub fn run(state: AppState) -> anyhow::Result<()> {
@@ -63,7 +82,11 @@ pub fn run(state: AppState) -> anyhow::Result<()> {
             import_fit_bytes,
             import_activity_path,
             sync_fit_files,
+            list_sync_files,
+            process_sync_file,
             get_storage_info,
+            clear_blacklisted_hashes,
+            get_blacklisted_hash_count,
             list_activities,
             get_overview,
             get_records,
@@ -201,7 +224,7 @@ fn import_activity_inner(
 }
 
 #[tauri::command]
-fn sync_fit_files(state: State<'_, AppState>) -> Result<SyncSummary, String> {
+fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<SyncSummary, String> {
     tracing::info!(fit_dir = %state.storage.fit_files_dir, "sync_fit_files command invoked");
     let mut summary = SyncSummary {
         scanned: 0,
@@ -211,6 +234,7 @@ fn sync_fit_files(state: State<'_, AppState>) -> Result<SyncSummary, String> {
         failed: 0,
     };
 
+    let mut files = Vec::new();
     let read_dir = std::fs::read_dir(&state.storage.fit_files_dir).map_err(|e| e.to_string())?;
     for entry in read_dir {
         let entry = match entry {
@@ -225,11 +249,51 @@ fn sync_fit_files(state: State<'_, AppState>) -> Result<SyncSummary, String> {
             continue;
         }
 
+        files.push(path);
+    }
+
+    let total = files.len();
+    emit_sync_progress(
+        &app,
+        SyncProgressEvent {
+            current_file: None,
+            processed: 0,
+            total,
+            scanned: 0,
+            imported: 0,
+            duplicates: 0,
+            blacklisted: 0,
+            failed: summary.failed,
+            done: false,
+        },
+    );
+
+    for (idx, path) in files.into_iter().enumerate() {
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("activity")
+            .to_string();
+
         summary.scanned += 1;
         let bytes = match std::fs::read(&path) {
             Ok(v) => v,
             Err(_) => {
                 summary.failed += 1;
+                emit_sync_progress(
+                    &app,
+                    SyncProgressEvent {
+                        current_file: Some(file_name),
+                        processed: idx + 1,
+                        total,
+                        scanned: summary.scanned,
+                        imported: summary.imported,
+                        duplicates: summary.duplicates,
+                        blacklisted: summary.blacklisted,
+                        failed: summary.failed,
+                        done: false,
+                    },
+                );
                 continue;
             }
         };
@@ -238,11 +302,39 @@ fn sync_fit_files(state: State<'_, AppState>) -> Result<SyncSummary, String> {
         match state.db.is_hash_blacklisted(&hash) {
             Ok(true) => {
                 summary.blacklisted += 1;
+                emit_sync_progress(
+                    &app,
+                    SyncProgressEvent {
+                        current_file: Some(file_name),
+                        processed: idx + 1,
+                        total,
+                        scanned: summary.scanned,
+                        imported: summary.imported,
+                        duplicates: summary.duplicates,
+                        blacklisted: summary.blacklisted,
+                        failed: summary.failed,
+                        done: false,
+                    },
+                );
                 continue;
             }
             Ok(false) => {}
             Err(_) => {
                 summary.failed += 1;
+                emit_sync_progress(
+                    &app,
+                    SyncProgressEvent {
+                        current_file: Some(file_name),
+                        processed: idx + 1,
+                        total,
+                        scanned: summary.scanned,
+                        imported: summary.imported,
+                        duplicates: summary.duplicates,
+                        blacklisted: summary.blacklisted,
+                        failed: summary.failed,
+                        done: false,
+                    },
+                );
                 continue;
             }
         }
@@ -250,27 +342,79 @@ fn sync_fit_files(state: State<'_, AppState>) -> Result<SyncSummary, String> {
         match state.db.is_file_imported(&hash) {
             Ok(true) => {
                 summary.duplicates += 1;
+                emit_sync_progress(
+                    &app,
+                    SyncProgressEvent {
+                        current_file: Some(file_name),
+                        processed: idx + 1,
+                        total,
+                        scanned: summary.scanned,
+                        imported: summary.imported,
+                        duplicates: summary.duplicates,
+                        blacklisted: summary.blacklisted,
+                        failed: summary.failed,
+                        done: false,
+                    },
+                );
                 continue;
             }
             Ok(false) => {}
             Err(_) => {
                 summary.failed += 1;
+                emit_sync_progress(
+                    &app,
+                    SyncProgressEvent {
+                        current_file: Some(file_name),
+                        processed: idx + 1,
+                        total,
+                        scanned: summary.scanned,
+                        imported: summary.imported,
+                        duplicates: summary.duplicates,
+                        blacklisted: summary.blacklisted,
+                        failed: summary.failed,
+                        done: false,
+                    },
+                );
                 continue;
             }
         }
-
-        let file_name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("activity")
-            .to_string();
         match parse_activity_bytes(&file_name, &bytes)
             .and_then(|parsed| state.db.insert_activity(parsed).map(|_| ()))
         {
             Ok(_) => summary.imported += 1,
             Err(_) => summary.failed += 1,
         }
+
+        emit_sync_progress(
+            &app,
+            SyncProgressEvent {
+                current_file: Some(file_name),
+                processed: idx + 1,
+                total,
+                scanned: summary.scanned,
+                imported: summary.imported,
+                duplicates: summary.duplicates,
+                blacklisted: summary.blacklisted,
+                failed: summary.failed,
+                done: false,
+            },
+        );
     }
+
+    emit_sync_progress(
+        &app,
+        SyncProgressEvent {
+            current_file: None,
+            processed: total,
+            total,
+            scanned: summary.scanned,
+            imported: summary.imported,
+            duplicates: summary.duplicates,
+            blacklisted: summary.blacklisted,
+            failed: summary.failed,
+            done: true,
+        },
+    );
 
     tracing::info!(
         scanned = summary.scanned,
@@ -284,8 +428,85 @@ fn sync_fit_files(state: State<'_, AppState>) -> Result<SyncSummary, String> {
 }
 
 #[tauri::command]
+fn list_sync_files(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    let read_dir = std::fs::read_dir(&state.storage.fit_files_dir).map_err(|e| e.to_string())?;
+    for entry in read_dir {
+        let entry = match entry {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if is_supported_activity_file(&path) {
+            files.push(path.to_string_lossy().to_string());
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+#[tauri::command]
+fn process_sync_file(state: State<'_, AppState>, path: String) -> Result<serde_json::Value, String> {
+    let path_ref = Path::new(&path);
+    if !is_supported_activity_file(path_ref) {
+        return Ok(serde_json::json!({ "status": "ignored", "file": path }));
+    }
+
+    let file_name = path_ref
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("activity")
+        .to_string();
+
+    let bytes = std::fs::read(path_ref).map_err(|e| format!("failed reading file: {e}"))?;
+    let hash = sha256_hex(&bytes);
+
+    if state
+        .db
+        .is_hash_blacklisted(&hash)
+        .map_err(|e| e.to_string())?
+    {
+        tracing::info!(file = %file_name, "sync file skipped: blacklisted");
+        return Ok(serde_json::json!({ "status": "blacklisted", "file": file_name }));
+    }
+
+    if state
+        .db
+        .is_file_imported(&hash)
+        .map_err(|e| e.to_string())?
+    {
+        tracing::info!(file = %file_name, "sync file skipped: duplicate");
+        return Ok(serde_json::json!({ "status": "duplicate", "file": file_name }));
+    }
+
+    let parsed = parse_activity_bytes(&file_name, &bytes).map_err(|e| e.to_string())?;
+    state.db.insert_activity(parsed).map_err(|e| e.to_string())?;
+    tracing::info!(file = %file_name, "sync file imported");
+
+    Ok(serde_json::json!({ "status": "imported", "file": file_name }))
+}
+
+#[tauri::command]
 fn get_storage_info(state: State<'_, AppState>) -> Result<StorageInfo, String> {
     Ok(state.storage.as_ref().clone())
+}
+
+#[tauri::command]
+fn clear_blacklisted_hashes(state: State<'_, AppState>) -> Result<usize, String> {
+    let removed = state
+        .db
+        .clear_blacklisted_hashes()
+        .map_err(|e| e.to_string())?;
+    tracing::info!(removed, "clear_blacklisted_hashes completed");
+    Ok(removed)
+}
+
+#[tauri::command]
+fn get_blacklisted_hash_count(state: State<'_, AppState>) -> Result<usize, String> {
+    state
+        .db
+        .blacklisted_hash_count()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

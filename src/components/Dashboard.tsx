@@ -663,23 +663,79 @@ export function Dashboard({ onLogout }: Props) {
   async function syncFromStorage() {
     if (isSyncing) return;
     setIsSyncing(true);
-    setImportMessage("Sync in progress...");
     try {
-      const result = await api.syncFitFiles();
+      const paths = await api.listSyncFiles();
+      const total = paths.length;
+      if (total === 0) {
+        setImportMessage("Sync complete: no supported files found.");
+        return;
+      }
+
+      let imported = 0;
+      let duplicates = 0;
+      let blacklisted = 0;
+      let failed = 0;
+
+      pushImportProgress(
+        { completed: 0, total, current: "Preparing sync queue...", status: "processing" },
+        `Sync: 0/${total}`
+      );
+      await waitForUiPaint();
+
+      for (let i = 0; i < paths.length; i++) {
+        const path = paths[i];
+        const fileName = path.split(/[\\/]/).pop() ?? path;
+        pushImportProgress(
+          { completed: i, total, current: fileName, currentIndex: i + 1, status: "processing" },
+          `Sync: ${i + 1}/${total} - ${fileName}`
+        );
+        await waitForUiPaint();
+
+        try {
+          const result = await api.processSyncFile(path);
+          if (result.status === "imported") imported++;
+          else if (result.status === "duplicate") duplicates++;
+          else if (result.status === "blacklisted") blacklisted++;
+        } catch (err) {
+          failed++;
+          tracingError("sync file processing failed", err);
+        }
+
+        pushImportProgress(
+          { completed: i + 1, total, current: fileName, currentIndex: i + 1, status: "processing" },
+          `Sync: ${i + 1}/${total} | imported ${imported}, duplicates ${duplicates}, blacklisted ${blacklisted}, failed ${failed}`
+        );
+        await waitForUiPaint();
+      }
+
       try {
+        pushImportProgress(
+          {
+            completed: total,
+            total,
+            current: "Refreshing activity list...",
+            status: "refreshing",
+          },
+          "Sync finished, refreshing activity list..."
+        );
         await refresh();
       } catch (err) {
         setImportMessage(`Sync finished, but refresh failed: ${err instanceof Error ? err.message : "unknown"}`);
         return;
       }
       setImportMessage(
-        `Sync complete: scanned ${result.scanned}, imported ${result.imported}, duplicates ${result.duplicates}, blacklisted ${result.blacklisted}, failed ${result.failed}.`
+        `Sync complete: scanned ${total}, imported ${imported}, duplicates ${duplicates}, blacklisted ${blacklisted}, failed ${failed}.`
       );
     } catch (err) {
       setImportMessage(`Sync failed: ${err instanceof Error ? err.message : "unknown"}`);
     } finally {
+      setImportProgress(null);
       setIsSyncing(false);
     }
+  }
+
+  function tracingError(message: string, err: unknown) {
+    console.warn(message, err);
   }
 
   /* ── Inline rename/delete ────────────────────────────────────────── */

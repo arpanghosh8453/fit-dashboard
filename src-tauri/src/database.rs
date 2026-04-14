@@ -593,6 +593,22 @@ impl Database {
         Ok(count > 0)
     }
 
+    pub fn clear_blacklisted_hashes(&self) -> Result<usize> {
+        let removed = {
+            let conn = self.conn.lock().expect("db mutex poisoned");
+            conn.execute("DELETE FROM file_hash_blacklist", [])?
+        };
+        self.checkpoint_if_wal_exceeds_limit()?;
+        Ok(removed)
+    }
+
+    pub fn blacklisted_hash_count(&self) -> Result<usize> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM file_hash_blacklist")?;
+        let count: i64 = stmt.query_row([], |r| r.get(0))?;
+        Ok(count.max(0) as usize)
+    }
+
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
