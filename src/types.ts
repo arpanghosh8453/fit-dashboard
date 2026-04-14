@@ -8,6 +8,8 @@ export type Activity = {
   end_ts_utc: string;
   duration_s: number;
   distance_m: number;
+  start_latitude?: number;
+  start_longitude?: number;
   metadata_json?: string;
 };
 

@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::{path::{Path, PathBuf}, sync::Mutex};
 
 use anyhow::{Context, Result};
 use duckdb::{params, Connection};
@@ -15,7 +15,31 @@ const WAL_LIMIT_BYTES: u64 = 25 * 1024 * 1024;
 impl Database {
     pub fn new(path: &str) -> Result<Self> {
         tracing::info!(db_path = %path, "opening duckdb database");
-        let conn = Connection::open(path).context("failed to open DuckDB")?;
+        let conn = match Connection::open(path) {
+            Ok(conn) => conn,
+            Err(open_err) => {
+                if !is_wal_replay_internal_error(&open_err) {
+                    return Err(open_err).context("failed to open DuckDB");
+                }
+
+                let wal_path = PathBuf::from(format!("{path}.wal"));
+                if !wal_path.exists() {
+                    return Err(open_err).context("failed to open DuckDB");
+                }
+
+                let quarantined = quarantine_wal_file(&wal_path)
+                    .context("failed to quarantine broken WAL file")?;
+                tracing::warn!(
+                    db_path = %path,
+                    wal_path = %wal_path.display(),
+                    quarantined_path = %quarantined.display(),
+                    "detected broken WAL replay during startup; quarantined WAL and retrying open"
+                );
+
+                Connection::open(path)
+                    .context("failed to open DuckDB after quarantining broken WAL")?
+            }
+        };
         let db = Self {
             conn: Mutex::new(conn),
             db_path: path.to_string(),
@@ -85,6 +109,8 @@ impl Database {
                 end_ts_utc TIMESTAMP,
                 duration_s REAL,
                 distance_m REAL,
+                start_latitude DOUBLE,
+                start_longitude DOUBLE,
                 source VARCHAR,
                 imported_at TIMESTAMP DEFAULT now(),
                 metadata_json VARCHAR
@@ -121,6 +147,35 @@ impl Database {
         )?;
 
         self.migrate_numeric_types_if_needed(&conn)?;
+
+                conn.execute("ALTER TABLE activities ADD COLUMN IF NOT EXISTS start_latitude DOUBLE", [])?;
+                conn.execute("ALTER TABLE activities ADD COLUMN IF NOT EXISTS start_longitude DOUBLE", [])?;
+                conn.execute(
+                        r#"
+                        UPDATE activities
+                        SET
+                                start_latitude = (
+                                        SELECT CAST(r.latitude AS DOUBLE)
+                                        FROM records r
+                                        WHERE r.activity_id = activities.id
+                                            AND r.latitude IS NOT NULL
+                                            AND r.longitude IS NOT NULL
+                                        ORDER BY r.timestamp_ms ASC
+                                        LIMIT 1
+                                ),
+                                start_longitude = (
+                                        SELECT CAST(r.longitude AS DOUBLE)
+                                        FROM records r
+                                        WHERE r.activity_id = activities.id
+                                            AND r.latitude IS NOT NULL
+                                            AND r.longitude IS NOT NULL
+                                        ORDER BY r.timestamp_ms ASC
+                                        LIMIT 1
+                                )
+                        WHERE start_latitude IS NULL OR start_longitude IS NULL
+                        "#,
+                        [],
+                )?;
 
         // Re-assert indexes after any table rebuild migration.
         let _ = conn.execute(
@@ -345,8 +400,8 @@ impl Database {
             let distance_m = round_6_to_f32(p.distance_m);
 
             conn.execute(
-                "INSERT INTO activities (id, file_hash, file_name, activity_name, sport, device, start_ts_utc, end_ts_utc, duration_s, distance_m, source, metadata_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                "INSERT INTO activities (id, file_hash, file_name, activity_name, sport, device, start_ts_utc, end_ts_utc, duration_s, distance_m, start_latitude, start_longitude, source, metadata_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     activity_id,
                     p.file_hash,
@@ -358,6 +413,8 @@ impl Database {
                     p.end_ts_utc,
                     duration_s,
                     distance_m,
+                    p.start_latitude,
+                    p.start_longitude,
                     p.source_format,
                     p.metadata_json
                 ],
@@ -385,7 +442,7 @@ impl Database {
     pub fn list_activities(&self) -> Result<Vec<Activity>> {
         let conn = self.conn.lock().expect("db mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, file_name, activity_name, COALESCE(sport,''), COALESCE(device,''), CAST(start_ts_utc AS VARCHAR), CAST(end_ts_utc AS VARCHAR), CAST(COALESCE(duration_s,0) AS DOUBLE), CAST(COALESCE(distance_m,0) AS DOUBLE), COALESCE(metadata_json,'')
+            "SELECT id, file_name, activity_name, COALESCE(sport,''), COALESCE(device,''), CAST(start_ts_utc AS VARCHAR), CAST(end_ts_utc AS VARCHAR), CAST(COALESCE(duration_s,0) AS DOUBLE), CAST(COALESCE(distance_m,0) AS DOUBLE), CAST(start_latitude AS DOUBLE), CAST(start_longitude AS DOUBLE), COALESCE(metadata_json,'')
              FROM activities ORDER BY start_ts_utc DESC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -399,7 +456,9 @@ impl Database {
                 end_ts_utc: row.get(6)?,
                 duration_s: row.get(7)?,
                 distance_m: row.get(8)?,
-                metadata_json: row.get(9)?,
+                start_latitude: row.get(9)?,
+                start_longitude: row.get(10)?,
+                metadata_json: row.get(11)?,
             })
         })?;
 
@@ -492,6 +551,24 @@ impl Database {
         }
         Ok(out)
     }
+}
+
+fn is_wal_replay_internal_error(err: &duckdb::Error) -> bool {
+    let msg = err.to_string().to_lowercase();
+    msg.contains("failure while replaying wal file")
+        || msg.contains("databasemanager::getdefaultdatabase")
+}
+
+fn quarantine_wal_file(wal_path: &Path) -> Result<PathBuf> {
+    let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let target = wal_path.with_extension(format!("wal.broken.{ts}"));
+
+    if std::fs::rename(wal_path, &target).is_err() {
+        std::fs::copy(wal_path, &target)?;
+        std::fs::remove_file(wal_path)?;
+    }
+
+    Ok(target)
 }
 
 fn column_type_matches(conn: &Connection, table: &str, column: &str, expected: &str) -> Result<bool> {

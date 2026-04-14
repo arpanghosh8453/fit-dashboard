@@ -29,6 +29,7 @@ pub struct RecordsQuery {
 /// SHA-256 hash of the valid supporter code.
 const SUPPORTER_HASH: &str =
     "20268baf2f8af1792eaf2cd864c29b3b6698b4387810f39946fbccbc350bf5c3";
+const SYNC_WAL_CHECKPOINT_EVERY_IMPORTED: usize = 10;
 
 pub fn app(state: AppState) -> Router {
     let cors = CorsLayer::new()
@@ -427,6 +428,7 @@ async fn sync_fit_files(
         skipped: 0,
         failed: 0,
     };
+    let mut imported_since_checkpoint = 0usize;
 
     let mut dir = tokio::fs::read_dir(&state.storage.fit_files_dir)
         .await
@@ -490,9 +492,25 @@ async fn sync_fit_files(
                         summary.failed += 1;
                         continue;
                     }
+                    if is_fit_file(&path)
+                        && move_sync_file_to_incompatible(&state, &path, &hash)
+                            .await
+                            .is_err()
+                    {
+                        summary.failed += 1;
+                        continue;
+                    }
                     summary.skipped += 1;
                 } else {
-                    summary.failed += 1;
+                    if is_fit_file(&path)
+                        && move_sync_file_to_incompatible(&state, &path, &hash)
+                            .await
+                            .is_ok()
+                    {
+                        summary.skipped += 1;
+                    } else {
+                        summary.failed += 1;
+                    }
                 }
                 continue;
             }
@@ -514,9 +532,26 @@ async fn sync_fit_files(
         }
 
         match state.db.insert_activity(parsed) {
-            Ok(_) => summary.imported += 1,
+            Ok(_) => {
+                summary.imported += 1;
+                imported_since_checkpoint += 1;
+                if imported_since_checkpoint >= SYNC_WAL_CHECKPOINT_EVERY_IMPORTED {
+                    state
+                        .db
+                        .flush_wal_to_disk()
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    imported_since_checkpoint = 0;
+                }
+            }
             Err(_) => summary.failed += 1,
         }
+    }
+
+    if imported_since_checkpoint > 0 {
+        state
+            .db
+            .flush_wal_to_disk()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
     tracing::info!(
@@ -610,7 +645,19 @@ async fn process_sync_file(
                     .db
                     .add_blacklisted_hash(&hash)
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                if is_fit_file(path) {
+                    move_sync_file_to_incompatible(&state, path, &hash)
+                        .await
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                }
                 tracing::info!(file = %file_name, "sync file skipped: non-activity FIT file");
+                return Ok(Json(serde_json::json!({ "status": "skipped", "file": file_name })));
+            }
+            if is_fit_file(path) {
+                move_sync_file_to_incompatible(&state, path, &hash)
+                    .await
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                tracing::info!(file = %file_name, "sync file skipped: incompatible FIT file moved to incompatible");
                 return Ok(Json(serde_json::json!({ "status": "skipped", "file": file_name })));
             }
             return Err(StatusCode::BAD_REQUEST);
@@ -880,6 +927,64 @@ fn is_supported_activity_file(path: &FsPath) -> bool {
                 || e.eq_ignore_ascii_case("gpx")
         })
         .unwrap_or(false)
+}
+
+fn is_fit_file(path: &FsPath) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("fit"))
+        .unwrap_or(false)
+}
+
+async fn move_sync_file_to_incompatible(
+    state: &AppState,
+    source_path: &FsPath,
+    file_hash: &str,
+) -> Result<(), anyhow::Error> {
+    let fit_dir = FsPath::new(&state.storage.fit_files_dir);
+    let incompatible_dir = fit_dir.join("incompatible");
+    tokio::fs::create_dir_all(&incompatible_dir).await?;
+
+    let file_name = source_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("activity.fit");
+
+    let mut target = incompatible_dir.join(file_name);
+    if let Ok(existing) = tokio::fs::read(&target).await {
+        let existing_hash = sha256_hex(&existing);
+        if existing_hash == file_hash {
+            tokio::fs::remove_file(source_path).await?;
+            return Ok(());
+        }
+
+        let stem = target
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("activity");
+        let ext = target
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("fit");
+        let suffix = &file_hash[..8.min(file_hash.len())];
+        target = incompatible_dir.join(format!("{stem}_{suffix}.{ext}"));
+
+        if let Ok(existing_renamed) = tokio::fs::read(&target).await {
+            let existing_hash = sha256_hex(&existing_renamed);
+            if existing_hash == file_hash {
+                tokio::fs::remove_file(source_path).await?;
+                return Ok(());
+            }
+        }
+    }
+
+    if tokio::fs::rename(source_path, &target).await.is_err() {
+        tokio::fs::copy(source_path, &target).await?;
+        tokio::fs::remove_file(source_path).await?;
+    }
+
+    tracing::info!(source = %source_path.display(), destination = %target.display(), "moved incompatible sync file");
+    Ok(())
 }
 
 async fn persist_fit_file(

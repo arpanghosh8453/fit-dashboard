@@ -242,6 +242,16 @@ fn total_distance_m(points: &[RecordPoint]) -> f64 {
         .unwrap_or(0.0)
 }
 
+fn first_valid_coordinates(points: &[RecordPoint]) -> (Option<f64>, Option<f64>) {
+    if let Some(point) = points
+        .iter()
+        .find(|p| p.latitude.is_some() && p.longitude.is_some())
+    {
+        return (point.latitude, point.longitude);
+    }
+    (None, None)
+}
+
 pub fn parse_activity_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let ext = Path::new(file_name)
         .extension()
@@ -526,6 +536,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
 
     let duration_s = ((end_ts - start_ts).max(0) as f64) / 1000.0;
     let distance_m = total_distance_m(&points);
+    let (start_latitude, start_longitude) = first_valid_coordinates(&points);
 
     let file_id_combined_name = combine_device_name(
         file_id_product_name.clone(),
@@ -593,6 +604,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             .to_rfc3339(),
         duration_s,
         distance_m,
+        start_latitude,
+        start_longitude,
         file_hash,
         records: points,
         metadata_json,
@@ -705,6 +718,7 @@ fn parse_tcx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
 
     let duration_s = ((end_ts - start_ts).max(0) as f64) / 1000.0;
     let distance_m = total_distance_m(&points);
+    let (start_latitude, start_longitude) = first_valid_coordinates(&points);
 
     let metadata_json = serde_json::json!({
         "record_count": points.len(),
@@ -730,6 +744,8 @@ fn parse_tcx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             .to_rfc3339(),
         duration_s,
         distance_m,
+        start_latitude,
+        start_longitude,
         file_hash,
         records: points,
         metadata_json,
@@ -849,6 +865,7 @@ fn parse_gpx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
 
     let duration_s = ((end_ts - start_ts).max(0) as f64) / 1000.0;
     let distance_m = total_distance_m(&points);
+    let (start_latitude, start_longitude) = first_valid_coordinates(&points);
 
     let metadata_json = serde_json::json!({
         "record_count": points.len(),
@@ -874,6 +891,8 @@ fn parse_gpx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             .to_rfc3339(),
         duration_s,
         distance_m,
+        start_latitude,
+        start_longitude,
         file_hash,
         records: points,
         metadata_json,

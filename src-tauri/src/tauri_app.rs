@@ -13,6 +13,7 @@ use crate::{
 /// SHA-256 hash of the valid supporter code.
 const SUPPORTER_HASH: &str =
     "20268baf2f8af1792eaf2cd864c29b3b6698b4387810f39946fbccbc350bf5c3";
+const SYNC_WAL_CHECKPOINT_EVERY_IMPORTED: usize = 10;
 
 #[derive(Serialize)]
 struct SyncSummary {
@@ -278,6 +279,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
     };
 
     let mut files = Vec::new();
+    let mut imported_since_checkpoint = 0usize;
     let read_dir = std::fs::read_dir(&state.storage.fit_files_dir).map_err(|e| e.to_string())?;
     for entry in read_dir {
         let entry = match entry {
@@ -450,9 +452,36 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
                         );
                         continue;
                     }
+                    if is_fit_file(&path)
+                        && move_sync_file_to_incompatible(&state, &path, &hash).is_err()
+                    {
+                        summary.failed += 1;
+                        emit_sync_progress(
+                            &app,
+                            SyncProgressEvent {
+                                current_file: Some(file_name),
+                                processed: idx + 1,
+                                total,
+                                scanned: summary.scanned,
+                                imported: summary.imported,
+                                duplicates: summary.duplicates,
+                                blacklisted: summary.blacklisted,
+                                skipped: summary.skipped,
+                                failed: summary.failed,
+                                done: false,
+                            },
+                        );
+                        continue;
+                    }
                     summary.skipped += 1;
                 } else {
-                    summary.failed += 1;
+                    if is_fit_file(&path)
+                        && move_sync_file_to_incompatible(&state, &path, &hash).is_ok()
+                    {
+                        summary.skipped += 1;
+                    } else {
+                        summary.failed += 1;
+                    }
                 }
                 emit_sync_progress(
                     &app,
@@ -519,7 +548,14 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
         }
 
         match state.db.insert_activity(parsed) {
-            Ok(_) => summary.imported += 1,
+            Ok(_) => {
+                summary.imported += 1;
+                imported_since_checkpoint += 1;
+                if imported_since_checkpoint >= SYNC_WAL_CHECKPOINT_EVERY_IMPORTED {
+                    state.db.flush_wal_to_disk().map_err(|e| e.to_string())?;
+                    imported_since_checkpoint = 0;
+                }
+            }
             Err(_) => summary.failed += 1,
         }
 
@@ -555,6 +591,10 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
             done: true,
         },
     );
+
+    if imported_since_checkpoint > 0 {
+        state.db.flush_wal_to_disk().map_err(|e| e.to_string())?;
+    }
 
     tracing::info!(
         scanned = summary.scanned,
@@ -628,7 +668,17 @@ fn process_sync_file(state: State<'_, AppState>, path: String) -> Result<serde_j
                     .db
                     .add_blacklisted_hash(&hash)
                     .map_err(|err| err.to_string())?;
+                if is_fit_file(path_ref) {
+                    move_sync_file_to_incompatible(&state, path_ref, &hash)
+                        .map_err(|err| err.to_string())?;
+                }
                 tracing::info!(file = %file_name, "sync file skipped: non-activity FIT file");
+                return Ok(serde_json::json!({ "status": "skipped", "file": file_name }));
+            }
+            if is_fit_file(path_ref) {
+                move_sync_file_to_incompatible(&state, path_ref, &hash)
+                    .map_err(|err| err.to_string())?;
+                tracing::info!(file = %file_name, "sync file skipped: incompatible FIT file moved to incompatible");
                 return Ok(serde_json::json!({ "status": "skipped", "file": file_name }));
             }
             return Err(e.to_string());
@@ -841,6 +891,63 @@ fn is_supported_activity_file(path: &Path) -> bool {
                 || e.eq_ignore_ascii_case("gpx")
         })
         .unwrap_or(false)
+}
+
+fn is_fit_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("fit"))
+        .unwrap_or(false)
+}
+
+fn move_sync_file_to_incompatible(
+    state: &AppState,
+    source_path: &Path,
+    file_hash: &str,
+) -> Result<(), anyhow::Error> {
+    let fit_dir = Path::new(&state.storage.fit_files_dir);
+    let incompatible_dir = fit_dir.join("incompatible");
+    std::fs::create_dir_all(&incompatible_dir)?;
+
+    let file_name = source_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("activity.fit");
+
+    let mut target = incompatible_dir.join(file_name);
+    if let Ok(existing) = std::fs::read(&target) {
+        let existing_hash = sha256_hex(&existing);
+        if existing_hash == file_hash {
+            std::fs::remove_file(source_path)?;
+            return Ok(());
+        }
+
+        let stem = target
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("activity");
+        let ext = target
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("fit");
+        let suffix = &file_hash[..8.min(file_hash.len())];
+        target = incompatible_dir.join(format!("{stem}_{suffix}.{ext}"));
+
+        if let Ok(existing_renamed) = std::fs::read(&target) {
+            let existing_hash = sha256_hex(&existing_renamed);
+            if existing_hash == file_hash {
+                std::fs::remove_file(source_path)?;
+                return Ok(());
+            }
+        }
+    }
+
+    if std::fs::rename(source_path, &target).is_err() {
+        std::fs::copy(source_path, &target)?;
+        std::fs::remove_file(source_path)?;
+    }
+    tracing::info!(source = %source_path.display(), destination = %target.display(), "moved incompatible sync file");
+    Ok(())
 }
 
 fn persist_fit_file(

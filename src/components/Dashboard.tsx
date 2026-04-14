@@ -265,8 +265,6 @@ export function Dashboard({ onLogout }: Props) {
   const [sortBy, setSortBy] = useState<"date" | "name" | "duration">("date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [isSortOpen, setIsSortOpen] = useState(false);
-  const [overviewRecords, setOverviewRecords] = useState<RecordPoint[]>([]);
-  const [overviewLoading, setOverviewLoading] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; activityId: number; activityName: string;
@@ -347,25 +345,18 @@ export function Dashboard({ onLogout }: Props) {
     return list;
   }, [filtered, sortBy, sortDirection]);
 
-  useEffect(() => {
-    if (tab !== "overview") return;
-    let cancelled = false;
-    async function loadOverviewRecords() {
-      setOverviewLoading(true);
-      try {
-        if (filtered.length === 0) {
-          if (!cancelled) setOverviewRecords([]);
-          return;
-        }
-        const chunks = await Promise.all(filtered.map((a) => api.getRecords(a.id, 45_000).catch(() => [])));
-        const merged = chunks.flat().sort((a, b) => a.timestamp_ms - b.timestamp_ms);
-        if (!cancelled) setOverviewRecords(merged);
-      } finally {
-        if (!cancelled) setOverviewLoading(false);
-      }
-    }
-    void loadOverviewRecords();
-    return () => { cancelled = true; };
+  const overviewRecords = useMemo(() => {
+    if (tab !== "overview") return [];
+    return filtered
+      .filter((a) => typeof a.start_latitude === "number" && typeof a.start_longitude === "number")
+      .map((a) => {
+        const ts = parseUtcDate(a.start_ts_utc).getTime();
+        return {
+          timestamp_ms: Number.isFinite(ts) ? ts : 0,
+          latitude: a.start_latitude,
+          longitude: a.start_longitude,
+        } as RecordPoint;
+      });
   }, [tab, filtered]);
 
   const sports = Array.from(new Set(activities.map((a) => a.sport).filter(Boolean)));
@@ -1357,14 +1348,7 @@ export function Dashboard({ onLogout }: Props) {
                   <OverviewSportTypeDonut activities={filtered} theme={theme} />
                 </div>
               </div>
-              {overviewLoading ? (
-                <div className="panel">
-                  <h3>Flight Locations</h3>
-                  <div className="small" style={{ padding: "2rem 0", textAlign: "center" }}>Building GPS density map...</div>
-                </div>
-              ) : (
-                <OverviewLocationMap records={overviewRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} />
-              )}
+              <OverviewLocationMap records={overviewRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} />
               <OverviewWeeklyTrend activities={filtered} distanceUnit={distanceUnit} theme={theme} />
             </>
             )

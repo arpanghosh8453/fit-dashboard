@@ -11,6 +11,8 @@ pub struct Activity {
     pub end_ts_utc: String,
     pub duration_s: f64,
     pub distance_m: f64,
+    pub start_latitude: Option<f64>,
+    pub start_longitude: Option<f64>,
     pub metadata_json: String,
 }
 
@@ -39,6 +41,8 @@ pub struct ParsedActivity {
     pub end_ts_utc: String,
     pub duration_s: f64,
     pub distance_m: f64,
+    pub start_latitude: Option<f64>,
+    pub start_longitude: Option<f64>,
     pub file_hash: String,
     pub records: Vec<RecordPoint>,
     pub metadata_json: String,
