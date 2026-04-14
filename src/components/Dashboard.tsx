@@ -967,8 +967,14 @@ export function Dashboard({ onLogout }: Props) {
                       >
                         {isImporting ? "Importing..." : "Select files (.fit/.tcx/.gpx)"}
                       </button>
-                      <button className="btn-secondary import-sync-btn" onClick={() => void syncFromStorage()} disabled={isImporting || isSyncing}>
-                        <IconRefresh /> {isSyncing ? "Syncing..." : "Sync"}
+                      <button
+                        className="btn-secondary import-sync-btn"
+                        onClick={() => void syncFromStorage()}
+                        disabled={isImporting || isSyncing}
+                        aria-label={isSyncing ? "Sync in progress" : "Sync"}
+                        title={isSyncing ? "Sync in progress" : "Sync"}
+                      >
+                        {isSyncing ? <span className="btn-spinner" aria-hidden="true" /> : <><IconRefresh /> Sync</>}
                       </button>
                     </div>
                     {isImporting && importProgress && (
