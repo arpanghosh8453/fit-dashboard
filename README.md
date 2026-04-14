@@ -35,11 +35,11 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/overview_page_2.png" alt="Overview Page" width="90%" />
+  <img src="screenshots/individual_page.png" alt="Individual Page" width="90%" />
 </p>
 
 <p align="center">
-  <img src="screenshots/individual_page.png" alt="Individual Page" width="90%" />
+  <img src="screenshots/individual_page_2.png" alt="Overview Page" width="90%" />
 </p>
 
 <p align="center">
