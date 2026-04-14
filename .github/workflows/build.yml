@@ -79,7 +79,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ needs.resolve-tag.outputs.tag }}
+          ref: main
 
       - name: Setup Node
         uses: actions/setup-node@v5
