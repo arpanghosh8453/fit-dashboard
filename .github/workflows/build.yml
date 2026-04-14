@@ -10,9 +10,6 @@ on:
         required: false
         type: string
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   resolve-tag:
     runs-on: ubuntu-latest
@@ -57,25 +54,33 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || needs.resolve-tag.outputs.tag }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.repository.default_branch }}
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Ensure tauri npm script exists (tag compatibility)
+        shell: bash
+        run: |
+          node -e "const fs=require('fs');const p='package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.scripts=j.scripts||{};if(!j.scripts.tauri){j.scripts.tauri='tauri';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\\n');console.log('Added scripts.tauri for CI compatibility');}else{console.log('scripts.tauri already present');}"
+
+      - name: Verify tauri script
+        run: npm run tauri -- --version
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
