@@ -324,6 +324,15 @@ impl Database {
         Ok(count > 0)
     }
 
+    pub fn activity_exists_with_exact_times(&self, start_ts_utc: &str, end_ts_utc: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*) FROM activities WHERE start_ts_utc = CAST(?1 AS TIMESTAMP) AND end_ts_utc = CAST(?2 AS TIMESTAMP)",
+        )?;
+        let count: i64 = stmt.query_row(params![start_ts_utc, end_ts_utc], |r| r.get(0))?;
+        Ok(count > 0)
+    }
+
     pub fn insert_activity(&self, p: ParsedActivity) -> Result<i64> {
         let activity_id: i64;
         {

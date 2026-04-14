@@ -13,7 +13,7 @@ use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer};
 
 use crate::{
     auth::{create_session, hash_password, verify_password},
-    fit_parser::parse_activity_bytes,
+    fit_parser::{is_non_activity_fit_error, parse_activity_bytes},
     models::{Credentials, RenameActivityPayload, TokenResponse, UnlockPayload},
     state::AppState,
 };
@@ -189,12 +189,19 @@ async fn import_fit(
                 Json(serde_json::json!({ "error": "failed reading upload bytes" })),
             )
         })?;
-        let parsed = parse_activity_bytes(&file_name, &bytes).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "error": format!("parse failed: {e}") })),
-            )
-        })?;
+        let parsed = match parse_activity_bytes(&file_name, &bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                if is_non_activity_fit_error(&e) {
+                    tracing::info!(file_name = %file_name, "upload skipped: non-activity FIT file");
+                    return Ok(Json(serde_json::json!({ "status": "skipped" })));
+                }
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "error": format!("parse failed: {e}") })),
+                ));
+            }
+        };
 
         // Manual imports always clear blacklist for this hash.
         state
@@ -221,16 +228,22 @@ async fn import_fit(
             return Ok(Json(serde_json::json!({ "status": "duplicate" })));
         }
 
-        persist_fit_file(&state, &file_name, &bytes, &parsed.file_hash)
-            .await
-            .map_err(|e| {
+        if state
+            .db
+            .activity_exists_with_exact_times(&parsed.start_ts_utc, &parsed.end_ts_utc)
+            .map_err(|_| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": format!("failed storing file: {e}") })),
+                    Json(serde_json::json!({ "error": "database query failed" })),
                 )
-            })?;
+            })?
+        {
+            tracing::info!(file_name = %file_name, start_ts = %parsed.start_ts_utc, end_ts = %parsed.end_ts_utc, "duplicate activity upload skipped: start/end timestamps already exist");
+            return Ok(Json(serde_json::json!({ "status": "duplicate" })));
+        }
 
         let source_format = parsed.source_format.clone();
+        let file_hash = parsed.file_hash.clone();
         let id = state
             .db
             .insert_activity(parsed)
@@ -240,6 +253,18 @@ async fn import_fit(
                     Json(serde_json::json!({ "error": "failed inserting activity" })),
                 )
             })?;
+
+        if let Err(e) = persist_fit_file(&state, &file_name, &bytes, &file_hash).await {
+            tracing::error!(activity_id = id, file_name = %file_name, error = %e, "upload persistence failed after DB insert; rolling back activity");
+            if let Err(rb_err) = state.db.delete_activity(id) {
+                tracing::error!(activity_id = id, file_name = %file_name, error = %rb_err, "rollback failed after upload persistence error");
+            }
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("failed storing file: {e}") })),
+            ));
+        }
+
         tracing::info!(activity_id = id, file_name = %file_name, source_format = %source_format, "activity upload imported successfully");
         return Ok(Json(serde_json::json!({ "status": "ok", "activity_id": id })));
     }
@@ -358,6 +383,7 @@ struct SyncSummary {
     imported: usize,
     duplicates: usize,
     blacklisted: usize,
+    skipped: usize,
     failed: usize,
 }
 
@@ -373,6 +399,7 @@ async fn sync_fit_files(
         imported: 0,
         duplicates: 0,
         blacklisted: 0,
+        skipped: 0,
         failed: 0,
     };
 
@@ -429,9 +456,35 @@ async fn sync_fit_files(
             .and_then(|s| s.to_str())
             .unwrap_or("activity")
             .to_string();
-        match parse_activity_bytes(&file_name, &bytes)
-            .and_then(|parsed| state.db.insert_activity(parsed).map(|_| ()))
+
+        let parsed = match parse_activity_bytes(&file_name, &bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                if is_non_activity_fit_error(&e) {
+                    summary.skipped += 1;
+                } else {
+                    summary.failed += 1;
+                }
+                continue;
+            }
+        };
+
+        match state
+            .db
+            .activity_exists_with_exact_times(&parsed.start_ts_utc, &parsed.end_ts_utc)
         {
+            Ok(true) => {
+                summary.duplicates += 1;
+                continue;
+            }
+            Ok(false) => {}
+            Err(_) => {
+                summary.failed += 1;
+                continue;
+            }
+        }
+
+        match state.db.insert_activity(parsed) {
             Ok(_) => summary.imported += 1,
             Err(_) => summary.failed += 1,
         }
@@ -442,6 +495,7 @@ async fn sync_fit_files(
         imported = summary.imported,
         duplicates = summary.duplicates,
         blacklisted = summary.blacklisted,
+        skipped = summary.skipped,
         failed = summary.failed,
         "sync-fit-files completed"
     );
@@ -519,8 +573,29 @@ async fn process_sync_file(
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 
-    let parsed = parse_activity_bytes(&file_name, &bytes)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let parsed = match parse_activity_bytes(&file_name, &bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            if is_non_activity_fit_error(&e) {
+                tracing::info!(file = %file_name, "sync file skipped: non-activity FIT file");
+                return Ok(Json(serde_json::json!({ "status": "skipped", "file": file_name })));
+            }
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    match state
+        .db
+        .activity_exists_with_exact_times(&parsed.start_ts_utc, &parsed.end_ts_utc)
+    {
+        Ok(true) => {
+            tracing::info!(file = %file_name, start_ts = %parsed.start_ts_utc, end_ts = %parsed.end_ts_utc, "sync file skipped: duplicate start/end timestamps");
+            return Ok(Json(serde_json::json!({ "status": "duplicate", "file": file_name })));
+        }
+        Ok(false) => {}
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+
     state
         .db
         .insert_activity(parsed)

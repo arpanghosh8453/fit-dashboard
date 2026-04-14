@@ -6,6 +6,13 @@ use sha2::{Digest, Sha256};
 
 use crate::models::{ParsedActivity, RecordPoint};
 
+const NON_ACTIVITY_FIT_MARKER: &str = "non-activity-fit:";
+
+pub fn is_non_activity_fit_error(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.to_string().starts_with(NON_ACTIVITY_FIT_MARKER))
+}
+
 fn value_f64(v: &Value) -> Option<f64> {
     match v {
         Value::Byte(x) => Some(*x as f64),
@@ -274,6 +281,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut file_id_manufacturer: Option<String> = None;
     let mut file_id_product: Option<String> = None;
     let mut file_id_serial_number: Option<i64> = None;
+    let mut file_id_type_name: Option<String> = None;
+    let mut file_id_type_code: Option<i64> = None;
     let mut device_info_fallback_name: Option<String> = None;
     let mut device_info_fallback_serial: Option<i64> = None;
     let mut device_info_creator_name: Option<String> = None;
@@ -431,6 +440,14 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         } else if rec.kind() == MesgNum::FileId {
             for field in rec.fields() {
                 match field.name() {
+                    "type" => {
+                        let value = value_string(field.value());
+                        let trimmed = value.trim();
+                        if !trimmed.is_empty() {
+                            file_id_type_name = Some(trimmed.to_string());
+                        }
+                        file_id_type_code = value_i64(field.value());
+                    }
                     "product_name" => {
                         let value = value_string(field.value());
                         if !value.is_empty() {
@@ -480,6 +497,24 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     .and_then(chrono::DateTime::from_timestamp_millis)
                     .map(|dt| dt.to_rfc3339())
             }));
+        }
+    }
+
+    if file_id_type_name.is_some() || file_id_type_code.is_some() {
+        let type_name = file_id_type_name
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .to_lowercase();
+        let is_activity_name = type_name == "activity";
+        let is_activity_code = file_id_type_code == Some(4) || type_name == "4";
+        if !(is_activity_name || is_activity_code) {
+            let type_desc = file_id_type_name
+                .clone()
+                .unwrap_or_else(|| file_id_type_code.map(|v| v.to_string()).unwrap_or_else(|| "unknown".to_string()));
+            return Err(anyhow!(
+                "{NON_ACTIVITY_FIT_MARKER} file_id.type={type_desc}"
+            ));
         }
     }
 

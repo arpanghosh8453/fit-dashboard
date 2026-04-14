@@ -13,6 +13,7 @@ type SyncSummary = {
   imported: number;
   duplicates: number;
   blacklisted: number;
+  skipped: number;
   failed: number;
 };
 
@@ -121,7 +122,7 @@ export const api = {
     fd.append("file", file);
     try {
       const res = await webClient.post("/import-fit", fd);
-      return res.data as { status: "ok" | "duplicate"; activity_id?: number };
+      return res.data as { status: "ok" | "duplicate" | "skipped"; activity_id?: number };
     } catch (error) {
       if (axios.isAxiosError(error)) {
         if (!error.response) {
@@ -157,7 +158,7 @@ export const api = {
     return res.data;
   },
 
-  async processSyncFile(path: string): Promise<{ status: "imported" | "duplicate" | "blacklisted" | "ignored"; file: string }> {
+  async processSyncFile(path: string): Promise<{ status: "imported" | "duplicate" | "blacklisted" | "skipped" | "ignored"; file: string }> {
     if (isTauriRuntime()) {
       return invoke("process_sync_file", { path });
     }

@@ -15,6 +15,7 @@
   - [Prebuilt Binaries](#prebuilt-binaries)
   - [Development](#development)
   - [Docker Deployment (Self-hosted)](#docker-deployment-self-hosted)
+- [Getting FIT Files from Garmin](#getting-fit-files-from-garmin)
 - [Usage](#usage)
 - [Export Formats](#export-formats)
 - [Tech Stack](#tech-stack)
@@ -115,6 +116,57 @@ Open http://localhost:8088 in your browser. The Nginx reverse proxy serves the f
 All data (DuckDB database, config) is stored in a Docker named volume mapped to `/data/fit-dashboard` inside the container. Data persists across container restarts and image updates.
 
 The desktop app runs the Rust backend natively with Tauri IPC — no web server needed.
+
+## Getting FIT Files from Garmin
+
+If your activities are in Garmin Connect, you can export FIT files in two ways.
+
+### Option A: Bulk export all data (recommended)
+
+Use Garmin's data export portal:
+
+- URL: https://www.garmin.com/en-US/account/datamanagement/exportdata/
+
+Steps:
+
+1. Sign in with your Garmin account.
+2. Go to Data Management and choose Export Your Data.
+3. Request the export and wait for Garmin to prepare the archive.
+4. Download the ZIP archive when it's ready from email
+5. Extract the ZIP on your computer.
+6. Find activity files (FIT/TCX/GPX) in the extracted folders - The exported zip contains a folder (DI_CONNECT/DI-Connect-Fitness-Uploaded-Files) containing your raw FIT activity files.
+7. In FIT Dashboard, use Import to select or drag-and-drop those files.
+
+When to use this option:
+
+- You want a full history export.
+- You are migrating from Garmin Connect to local storage.
+
+### Option B: Export one activity at a time
+
+Use the activity page in Garmin Connect:
+
+- URL: https://connect.garmin.com/app/activities
+
+Steps:
+
+1. Open the Activities page.
+2. Click an activity to open details.
+3. Open the gear menu (top-right on the activity page).
+4. Click Export Original (or Export TCX/GPX depending on availability).
+5. Repeat for each activity you want.
+6. Import downloaded files into FIT Dashboard.
+
+When to use this option:
+
+- You only need a few activities.
+- You want to re-export specific workouts.
+
+Tips:
+
+- FIT is the preferred format when available, because it usually includes the richest telemetry.
+- You can import `.fit`, `.tcx`, and `.gpx` files in FIT Dashboard.
+- If duplicate files are imported, FIT Dashboard will skip them automatically. But if you have the save activity file in different format, it may still cause duplicate. We de-duplicate them based on file hash and exact start and end timestamp match of an activity. 
 
 ## Usage
 

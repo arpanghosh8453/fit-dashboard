@@ -5,7 +5,7 @@ use tauri::{Emitter, Manager, State};
 
 use crate::{
     auth::{create_session, hash_password, verify_password},
-    fit_parser::parse_activity_bytes,
+    fit_parser::{is_non_activity_fit_error, parse_activity_bytes},
     models::{Activity, OverviewStats, RecordPoint, TokenResponse},
     state::{AppState, StorageInfo},
 };
@@ -20,6 +20,7 @@ struct SyncSummary {
     imported: usize,
     duplicates: usize,
     blacklisted: usize,
+    skipped: usize,
     failed: usize,
 }
 
@@ -32,6 +33,7 @@ struct SyncProgressEvent {
     imported: usize,
     duplicates: usize,
     blacklisted: usize,
+    skipped: usize,
     failed: usize,
     done: bool,
 }
@@ -200,7 +202,16 @@ fn import_activity_inner(
     bytes: &[u8],
 ) -> Result<serde_json::Value, String> {
     tracing::debug!(file_name = %file_name, bytes = bytes.len(), "processing import payload");
-    let parsed = parse_activity_bytes(file_name, bytes).map_err(|e| e.to_string())?;
+    let parsed = match parse_activity_bytes(file_name, bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            if is_non_activity_fit_error(&e) {
+                tracing::info!(file_name = %file_name, "import skipped: non-activity FIT file");
+                return Ok(serde_json::json!({ "status": "skipped" }));
+            }
+            return Err(e.to_string());
+        }
+    };
 
     state
         .db
@@ -216,8 +227,24 @@ fn import_activity_inner(
         return Ok(serde_json::json!({ "status": "duplicate" }));
     }
 
-    persist_fit_file(state, file_name, bytes, &parsed.file_hash).map_err(|e| e.to_string())?;
+    if state
+        .db
+        .activity_exists_with_exact_times(&parsed.start_ts_utc, &parsed.end_ts_utc)
+        .map_err(|e| e.to_string())?
+    {
+        tracing::info!(file_name = %file_name, start_ts = %parsed.start_ts_utc, end_ts = %parsed.end_ts_utc, "import skipped: duplicate start/end timestamps");
+        return Ok(serde_json::json!({ "status": "duplicate" }));
+    }
+
+    let file_hash = parsed.file_hash.clone();
     let activity_id = state.db.insert_activity(parsed).map_err(|e| e.to_string())?;
+    if let Err(err) = persist_fit_file(state, file_name, bytes, &file_hash) {
+        tracing::error!(file_name = %file_name, activity_id, error = %err, "import persistence failed after DB insert; rolling back activity");
+        if let Err(rb_err) = state.db.delete_activity(activity_id) {
+            tracing::error!(file_name = %file_name, activity_id, error = %rb_err, "rollback failed after import persistence error");
+        }
+        return Err(format!("failed storing file: {err}"));
+    }
     tracing::info!(file_name = %file_name, activity_id, "import completed successfully");
 
     Ok(serde_json::json!({ "status": "ok", "activity_id": activity_id }))
@@ -231,6 +258,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
         imported: 0,
         duplicates: 0,
         blacklisted: 0,
+        skipped: 0,
         failed: 0,
     };
 
@@ -263,6 +291,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
             imported: 0,
             duplicates: 0,
             blacklisted: 0,
+            skipped: 0,
             failed: summary.failed,
             done: false,
         },
@@ -290,6 +319,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
                         imported: summary.imported,
                         duplicates: summary.duplicates,
                         blacklisted: summary.blacklisted,
+                        skipped: summary.skipped,
                         failed: summary.failed,
                         done: false,
                     },
@@ -312,6 +342,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
                         imported: summary.imported,
                         duplicates: summary.duplicates,
                         blacklisted: summary.blacklisted,
+                        skipped: summary.skipped,
                         failed: summary.failed,
                         done: false,
                     },
@@ -331,6 +362,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
                         imported: summary.imported,
                         duplicates: summary.duplicates,
                         blacklisted: summary.blacklisted,
+                        skipped: summary.skipped,
                         failed: summary.failed,
                         done: false,
                     },
@@ -352,6 +384,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
                         imported: summary.imported,
                         duplicates: summary.duplicates,
                         blacklisted: summary.blacklisted,
+                        skipped: summary.skipped,
                         failed: summary.failed,
                         done: false,
                     },
@@ -371,6 +404,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
                         imported: summary.imported,
                         duplicates: summary.duplicates,
                         blacklisted: summary.blacklisted,
+                        skipped: summary.skipped,
                         failed: summary.failed,
                         done: false,
                     },
@@ -378,9 +412,79 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
                 continue;
             }
         }
-        match parse_activity_bytes(&file_name, &bytes)
-            .and_then(|parsed| state.db.insert_activity(parsed).map(|_| ()))
+        let parsed = match parse_activity_bytes(&file_name, &bytes) {
+            Ok(v) => v,
+            Err(e) => {
+                if is_non_activity_fit_error(&e) {
+                    summary.skipped += 1;
+                } else {
+                    summary.failed += 1;
+                }
+                emit_sync_progress(
+                    &app,
+                    SyncProgressEvent {
+                        current_file: Some(file_name),
+                        processed: idx + 1,
+                        total,
+                        scanned: summary.scanned,
+                        imported: summary.imported,
+                        duplicates: summary.duplicates,
+                        blacklisted: summary.blacklisted,
+                        skipped: summary.skipped,
+                        failed: summary.failed,
+                        done: false,
+                    },
+                );
+                continue;
+            }
+        };
+
+        match state
+            .db
+            .activity_exists_with_exact_times(&parsed.start_ts_utc, &parsed.end_ts_utc)
         {
+            Ok(true) => {
+                summary.duplicates += 1;
+                emit_sync_progress(
+                    &app,
+                    SyncProgressEvent {
+                        current_file: Some(file_name),
+                        processed: idx + 1,
+                        total,
+                        scanned: summary.scanned,
+                        imported: summary.imported,
+                        duplicates: summary.duplicates,
+                        blacklisted: summary.blacklisted,
+                        skipped: summary.skipped,
+                        failed: summary.failed,
+                        done: false,
+                    },
+                );
+                continue;
+            }
+            Ok(false) => {}
+            Err(_) => {
+                summary.failed += 1;
+                emit_sync_progress(
+                    &app,
+                    SyncProgressEvent {
+                        current_file: Some(file_name),
+                        processed: idx + 1,
+                        total,
+                        scanned: summary.scanned,
+                        imported: summary.imported,
+                        duplicates: summary.duplicates,
+                        blacklisted: summary.blacklisted,
+                        skipped: summary.skipped,
+                        failed: summary.failed,
+                        done: false,
+                    },
+                );
+                continue;
+            }
+        }
+
+        match state.db.insert_activity(parsed) {
             Ok(_) => summary.imported += 1,
             Err(_) => summary.failed += 1,
         }
@@ -395,6 +499,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
                 imported: summary.imported,
                 duplicates: summary.duplicates,
                 blacklisted: summary.blacklisted,
+                skipped: summary.skipped,
                 failed: summary.failed,
                 done: false,
             },
@@ -411,6 +516,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
             imported: summary.imported,
             duplicates: summary.duplicates,
             blacklisted: summary.blacklisted,
+            skipped: summary.skipped,
             failed: summary.failed,
             done: true,
         },
@@ -421,6 +527,7 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
         imported = summary.imported,
         duplicates = summary.duplicates,
         blacklisted = summary.blacklisted,
+        skipped = summary.skipped,
         failed = summary.failed,
         "sync_fit_files completed"
     );
@@ -479,7 +586,26 @@ fn process_sync_file(state: State<'_, AppState>, path: String) -> Result<serde_j
         return Ok(serde_json::json!({ "status": "duplicate", "file": file_name }));
     }
 
-    let parsed = parse_activity_bytes(&file_name, &bytes).map_err(|e| e.to_string())?;
+    let parsed = match parse_activity_bytes(&file_name, &bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            if is_non_activity_fit_error(&e) {
+                tracing::info!(file = %file_name, "sync file skipped: non-activity FIT file");
+                return Ok(serde_json::json!({ "status": "skipped", "file": file_name }));
+            }
+            return Err(e.to_string());
+        }
+    };
+
+    if state
+        .db
+        .activity_exists_with_exact_times(&parsed.start_ts_utc, &parsed.end_ts_utc)
+        .map_err(|e| e.to_string())?
+    {
+        tracing::info!(file = %file_name, start_ts = %parsed.start_ts_utc, end_ts = %parsed.end_ts_utc, "sync file skipped: duplicate start/end timestamps");
+        return Ok(serde_json::json!({ "status": "duplicate", "file": file_name }));
+    }
+
     state.db.insert_activity(parsed).map_err(|e| e.to_string())?;
     tracing::info!(file = %file_name, "sync file imported");
 

@@ -72,6 +72,11 @@ function formatPace(secondsPerUnit: number, unit: string): string {
   return `${min}:${String(sec).padStart(2, "0")} /${unit}`;
 }
 
+function shortenFileName(name: string, maxLength = 45): string {
+  if (name.length <= maxLength) return name;
+  return `${name.slice(0, maxLength)}...`;
+}
+
 function parseActivityMetadata(raw?: string): ActivityMetadata | null {
   if (!raw) return null;
   try {
@@ -396,6 +401,8 @@ export function Dashboard({ onLogout }: Props) {
   }
 
   async function waitForUiPaint() {
+    // Two RAF ticks ensure at least one paint happens before heavy async work starts.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   }
 
@@ -415,6 +422,15 @@ export function Dashboard({ onLogout }: Props) {
     });
   }
 
+  function startImportProgress(total: number) {
+    flushSync(() => {
+      setIsImporting(true);
+      setIsImportOpen(true);
+      setImportProgress({ completed: 0, total, current: "Preparing queue...", status: "processing" });
+      setImportMessage(`Processing 0/${total}`);
+    });
+  }
+
   async function importFromPaths(paths: string[]) {
     if (!paths.length || isImporting || isSyncing) return;
     const validPaths = paths.filter((p) => {
@@ -426,26 +442,25 @@ export function Dashboard({ onLogout }: Props) {
       return;
     }
 
-    setIsImporting(true);
-    pushImportProgress(
-      { completed: 0, total: validPaths.length, current: "Preparing queue...", status: "processing" },
-      `Processing 0/${validPaths.length}`,
-    );
+    startImportProgress(validPaths.length);
     await waitForUiPaint();
-    let imported = 0, duplicates = 0, failed = 0;
+    let imported = 0, duplicates = 0, skipped = 0, failed = 0;
     let refreshError: string | null = null;
     for (let i = 0; i < validPaths.length; i++) {
       const path = validPaths[i];
       const fileName = path.split(/[\\/]/).pop() ?? path;
+      const fileNameDisplay = shortenFileName(fileName);
       pushImportProgress(
-        { completed: i, total: validPaths.length, current: fileName, currentIndex: i + 1, status: "processing" },
-        `Processing ${i + 1}/${validPaths.length}: ${fileName}`,
+        { completed: i, total: validPaths.length, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
+        `Processing ${i + 1}/${validPaths.length}: ${fileNameDisplay}`,
       );
       await waitForUiPaint();
       try {
         const result: any = await api.importActivityPath(path);
         if (result?.status === "duplicate") {
           duplicates++;
+        } else if (result?.status === "skipped") {
+          skipped++;
         } else {
           imported++;
           if (imported % 10 === 0) {
@@ -465,18 +480,18 @@ export function Dashboard({ onLogout }: Props) {
               if (!refreshError) refreshError = err instanceof Error ? err.message : "unknown";
             }
             pushImportProgress(
-              { completed: i + 1, total: validPaths.length, current: fileName, currentIndex: i + 1, status: "processing" },
+              { completed: i + 1, total: validPaths.length, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
             );
             await waitForUiPaint();
           }
         }
       } catch (err) {
         failed++;
-        setImportMessage(`Failed on ${fileName}: ${err instanceof Error ? err.message : "unknown"}`);
+        setImportMessage(`Failed on ${fileNameDisplay}: ${err instanceof Error ? err.message : "unknown"}`);
       }
       pushImportProgress(
-        { completed: i + 1, total: validPaths.length, current: fileName, currentIndex: i + 1, status: "processing" },
-        `Processed ${i + 1}/${validPaths.length}: ${fileName}`,
+        { completed: i + 1, total: validPaths.length, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
+        `Processed ${i + 1}/${validPaths.length}: ${fileNameDisplay}`,
       );
       await waitForUiPaint();
     }
@@ -494,9 +509,9 @@ export function Dashboard({ onLogout }: Props) {
     setIsImporting(false);
     setImportProgress(null);
     if (refreshError) {
-      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}. Refresh failed: ${refreshError}`);
+      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, skipped ${skipped}, failed ${failed}. Refresh failed: ${refreshError}`);
     } else {
-      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}.`);
+      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, skipped ${skipped}, failed ${failed}.`);
     }
   }
 
@@ -551,24 +566,23 @@ export function Dashboard({ onLogout }: Props) {
       return name.endsWith(".fit") || name.endsWith(".tcx") || name.endsWith(".gpx");
     });
     if (!files.length) { setImportMessage("No supported files selected (.fit, .tcx, .gpx)."); return; }
-    setIsImporting(true);
-    pushImportProgress(
-      { completed: 0, total: files.length, current: "Preparing queue...", status: "processing" },
-      `Processing 0/${files.length}`,
-    );
+    startImportProgress(files.length);
     await waitForUiPaint();
-    let imported = 0, duplicates = 0, failed = 0;
+    let imported = 0, duplicates = 0, skipped = 0, failed = 0;
     let refreshError: string | null = null;
     for (let i = 0; i < files.length; i++) {
+      const fileNameDisplay = shortenFileName(files[i].name);
       pushImportProgress(
-        { completed: i, total: files.length, current: files[i].name, currentIndex: i + 1, status: "processing" },
-        `Processing ${i + 1}/${files.length}: ${files[i].name}`,
+        { completed: i, total: files.length, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
+        `Processing ${i + 1}/${files.length}: ${fileNameDisplay}`,
       );
       await waitForUiPaint();
       try {
         const result: any = await api.importFit(files[i]);
         if (result?.status === "duplicate") {
           duplicates++;
+        } else if (result?.status === "skipped") {
+          skipped++;
         } else {
           imported++;
           if (imported % 10 === 0) {
@@ -588,18 +602,18 @@ export function Dashboard({ onLogout }: Props) {
               if (!refreshError) refreshError = err instanceof Error ? err.message : "unknown";
             }
             pushImportProgress(
-              { completed: i + 1, total: files.length, current: files[i].name, currentIndex: i + 1, status: "processing" },
+              { completed: i + 1, total: files.length, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
             );
             await waitForUiPaint();
           }
         }
       } catch (err) {
         failed++;
-        setImportMessage(`Failed on ${files[i].name}: ${err instanceof Error ? err.message : "unknown"}`);
+        setImportMessage(`Failed on ${fileNameDisplay}: ${err instanceof Error ? err.message : "unknown"}`);
       }
       pushImportProgress(
-        { completed: i + 1, total: files.length, current: files[i].name, currentIndex: i + 1, status: "processing" },
-        `Processed ${i + 1}/${files.length}: ${files[i].name}`,
+        { completed: i + 1, total: files.length, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
+        `Processed ${i + 1}/${files.length}: ${fileNameDisplay}`,
       );
       await waitForUiPaint();
     }
@@ -616,9 +630,9 @@ export function Dashboard({ onLogout }: Props) {
     setIsImporting(false);
     setImportProgress(null);
     if (refreshError) {
-      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}. Refresh failed: ${refreshError}`);
+      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, skipped ${skipped}, failed ${failed}. Refresh failed: ${refreshError}`);
     } else {
-      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, failed ${failed}.`);
+      setImportMessage(`Batch complete: imported ${imported}, duplicates ${duplicates}, skipped ${skipped}, failed ${failed}.`);
     }
   }
 
@@ -674,6 +688,7 @@ export function Dashboard({ onLogout }: Props) {
       let imported = 0;
       let duplicates = 0;
       let blacklisted = 0;
+      let skipped = 0;
       let failed = 0;
 
       pushImportProgress(
@@ -685,9 +700,10 @@ export function Dashboard({ onLogout }: Props) {
       for (let i = 0; i < paths.length; i++) {
         const path = paths[i];
         const fileName = path.split(/[\\/]/).pop() ?? path;
+        const fileNameDisplay = shortenFileName(fileName);
         pushImportProgress(
-          { completed: i, total, current: fileName, currentIndex: i + 1, status: "processing" },
-          `Sync: ${i + 1}/${total} - ${fileName}`
+          { completed: i, total, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
+          `Sync: ${i + 1}/${total} - ${fileNameDisplay}`
         );
         await waitForUiPaint();
 
@@ -696,14 +712,15 @@ export function Dashboard({ onLogout }: Props) {
           if (result.status === "imported") imported++;
           else if (result.status === "duplicate") duplicates++;
           else if (result.status === "blacklisted") blacklisted++;
+          else if (result.status === "skipped") skipped++;
         } catch (err) {
           failed++;
           tracingError("sync file processing failed", err);
         }
 
         pushImportProgress(
-          { completed: i + 1, total, current: fileName, currentIndex: i + 1, status: "processing" },
-          `Sync: ${i + 1}/${total} | imported ${imported}, duplicates ${duplicates}, blacklisted ${blacklisted}, failed ${failed}`
+          { completed: i + 1, total, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
+          `Sync: ${i + 1}/${total} - ${fileNameDisplay}`
         );
         await waitForUiPaint();
       }
@@ -724,7 +741,7 @@ export function Dashboard({ onLogout }: Props) {
         return;
       }
       setImportMessage(
-        `Sync complete: scanned ${total}, imported ${imported}, duplicates ${duplicates}, blacklisted ${blacklisted}, failed ${failed}.`
+        `Sync complete: scanned ${total}, imported ${imported}, duplicates ${duplicates}, blacklisted ${blacklisted}, skipped ${skipped}, failed ${failed}.`
       );
     } catch (err) {
       setImportMessage(`Sync failed: ${err instanceof Error ? err.message : "unknown"}`);
