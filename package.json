@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "echo 'No linter configured yet'",
+    "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
