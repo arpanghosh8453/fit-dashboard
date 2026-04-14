@@ -10,11 +10,15 @@ on:
         required: false
         type: string
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   resolve-tag:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      release_id: ${{ steps.tag.outputs.release_id }}
     steps:
       - name: Resolve release tag
         id: tag
@@ -26,9 +30,15 @@ jobs:
 
           if [ "${{ github.event_name }}" = "release" ]; then
             TAG="${{ github.event.release.tag_name }}"
+            RELEASE_ID="${{ github.event.release.id }}"
             echo "Using release event tag: $TAG"
           elif [ -n "${INPUT_TAG}" ]; then
             TAG="${INPUT_TAG}"
+            RELEASE_ID=$(gh release view "$TAG" --repo "${{ github.repository }}" --json databaseId -q '.databaseId' || true)
+            if [ -z "$RELEASE_ID" ]; then
+              echo "::error::Release not found for input tag $TAG"
+              exit 1
+            fi
             echo "Using manual input tag: $TAG"
           else
             TAG=$(gh release view --repo "${{ github.repository }}" --json tagName -q '.tagName' || true)
@@ -36,10 +46,16 @@ jobs:
               echo "::error::No release tag found. Provide workflow_dispatch input tag or publish a release first."
               exit 1
             fi
+            RELEASE_ID=$(gh release view --repo "${{ github.repository }}" --json databaseId -q '.databaseId' || true)
+            if [ -z "$RELEASE_ID" ]; then
+              echo "::error::Unable to resolve latest release id"
+              exit 1
+            fi
             echo "Using latest release tag: $TAG"
           fi
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
   build:
     needs: resolve-tag
@@ -63,7 +79,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.repository.default_branch }}
+          ref: ${{ needs.resolve-tag.outputs.tag }}
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -95,14 +111,16 @@ jobs:
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            rpm
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Build and upload release assets
+      - name: Build and upload release assets (non-Windows)
+        if: runner.os != 'Windows'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -113,4 +131,61 @@ jobs:
           releaseDraft: false
           prerelease: false
           uploadPlainBinary: true
+          assetNamePattern: 'fit-dashboard_[version]_[platform]_[arch].[ext]'
           args: --target ${{ matrix.target }} --verbose
+
+      - name: Build and upload release assets (Windows nsis + msi)
+        if: runner.os == 'Windows'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tagName: ${{ needs.resolve-tag.outputs.tag }}
+          includeRelease: true
+          releaseDraft: false
+          prerelease: false
+          uploadPlainBinary: true
+          assetNamePattern: 'fit-dashboard_[version]_[platform]_[arch].[ext]'
+          args: --target ${{ matrix.target }} --bundles nsis,msi --verbose
+
+  checksums:
+    needs: [resolve-tag, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          mkdir assets
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            --dir assets \
+            --pattern '*.deb' \
+            --pattern '*.rpm' \
+            --pattern '*.AppImage' \
+            --pattern '*.dmg' \
+            --pattern '*.exe' \
+            --pattern '*.msi' \
+            --pattern '*.nsis.zip' \
+            --pattern 'fit-dashboard_*'
+
+      - name: Generate checksums
+        run: |
+          cd assets
+          sha256sum * | sort -k2 > ../checksums.txt
+          echo "Generated checksums:"
+          cat ../checksums.txt
+
+      - name: Upload checksums to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          gh release upload "$TAG" checksums.txt \
+            --repo "${{ github.repository }}" \
+            --clobber
