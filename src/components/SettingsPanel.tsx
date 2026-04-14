@@ -90,6 +90,8 @@ export function SettingsPanel() {
 
           <label><span>Map Style</span><select value={mapStyle} onChange={(e) => setMapStyle(e.target.value as any)}>
               <option value="default">Default</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
               <option value="openstreet">OpenStreet</option>
               <option value="topo">Topo</option>
               <option value="satellite">Satellite</option>

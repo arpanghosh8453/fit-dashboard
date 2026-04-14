@@ -6,9 +6,10 @@ type Props = {
   theme: "light" | "dark";
   zoomRange?: { start: number; end: number } | null;
   onZoomChange?: (range: { start: number; end: number }) => void;
+  lapTimestampsUtc?: string[];
 };
 
-export function ActivityChart({ records, theme, zoomRange, onZoomChange }: Props) {
+export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTimestampsUtc = [] }: Props) {
   const t0 = records[0]?.timestamp_ms ?? 0;
   
   // Format MM:SS or HH:MM:SS
@@ -37,6 +38,17 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange }: Props
     return [relMs, paceMinPerKm, r.timestamp_ms];
   });
 
+  const lapMarkers = lapTimestampsUtc
+    .slice(1)
+    .map((ts, idx) => {
+      const parsed = Date.parse(ts);
+      if (!Number.isFinite(parsed)) return null;
+      const relMs = parsed - t0;
+      if (relMs < 0) return null;
+      return { xAxis: relMs, name: `Lap ${idx + 1}` };
+    })
+    .filter((m): m is { xAxis: number; name: string } => m !== null);
+
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
@@ -53,8 +65,7 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange }: Props
       formatter: (params: any) => {
         const p = params[0];
         const relTime = formatRelTime(p.value[0]);
-        const absTime = new Date(p.value[2]).toLocaleTimeString();
-        let html = `<div><strong>${relTime}</strong> <span style="color:#888;font-size:10px">(${absTime})</span></div>`;
+        let html = `<div><strong>${relTime}</strong></div>`;
         for (const s of params) {
           if (s.value[1] !== null && s.value[1] !== undefined) {
             html += `<div>${s.marker} ${s.seriesName}: <strong>${s.value[1]}</strong></div>`;
@@ -118,6 +129,12 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange }: Props
         lineStyle: { width: 2 },
         areaStyle: { opacity: 0.12 },
         data: hrSeriesData,
+        markLine: lapMarkers.length ? {
+          symbol: ["none", "none"],
+          lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
+          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          data: lapMarkers,
+        } : undefined,
       },
     ],
   };
@@ -131,8 +148,7 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange }: Props
       formatter: (params: any) => {
         const p = params[0];
         const relTime = formatRelTime(p.value[0]);
-        const absTime = new Date(p.value[2]).toLocaleTimeString();
-        let html = `<div><strong>${relTime}</strong> <span style="color:#888;font-size:10px">(${absTime})</span></div>`;
+        let html = `<div><strong>${relTime}</strong></div>`;
         for (const s of params) {
           if (s.value[1] !== null && s.value[1] !== undefined) {
             const pace = Number(s.value[1]);
@@ -186,6 +202,12 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange }: Props
         lineStyle: { width: 2, color: "#f43f5e" },
         areaStyle: { color: isDark ? "rgba(244, 63, 94, 0.1)" : "rgba(244, 63, 94, 0.12)" },
         data: paceSeriesData,
+        markLine: lapMarkers.length ? {
+          symbol: ["none", "none"],
+          lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
+          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          data: lapMarkers,
+        } : undefined,
       },
     ],
   };

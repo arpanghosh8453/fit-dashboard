@@ -6,24 +6,27 @@ type Props = {
   theme: "light" | "dark";
   zoomRange?: { start: number; end: number } | null;
   onZoomChange?: (range: { start: number; end: number }) => void;
+  lapTimestampsUtc?: string[];
 };
 
-function safeAvg(values: Array<number | undefined>): number {
-  const nums = values.filter((v): v is number => typeof v === "number");
-  if (!nums.length) return 0;
+function safeAvg(values: Array<number | null | undefined>): number | null {
+  const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  if (!nums.length) return null;
   return nums.reduce((sum, n) => sum + n, 0) / nums.length;
 }
 
-function quantile(sorted: number[], q: number): number {
-  if (!sorted.length) return 0;
-  const idx = (sorted.length - 1) * q;
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  if (lo === hi) return sorted[lo];
-  return sorted[lo] * (hi - idx) + sorted[hi] * (idx - lo);
+function formatRelTime(ms: number): string {
+  const totalSec = Math.floor(Math.max(0, ms) / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Props) {
+export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapTimestampsUtc = [] }: Props) {
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
@@ -46,6 +49,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
     );
   }
 
+  const t0 = records[0]?.timestamp_ms ?? 0;
   const timeline = records.map((r, i) => {
     const prev = i > 0 ? records[i - 1] : undefined;
     const dt = prev ? (r.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
@@ -56,74 +60,83 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
     const speedMs = r.speed_m_s ?? derivedSpeed;
     const speedKmh = typeof speedMs === "number" ? speedMs * 3.6 : null;
     const paceMinPerKm = speedKmh && speedKmh > 0 ? 60 / speedKmh : null;
-    return [r.timestamp_ms, speedKmh, r.altitude_m ?? null, paceMinPerKm, r.heart_rate ?? null, r.power ?? null];
+    return {
+      relMs: r.timestamp_ms - t0,
+      speedKmh,
+      altitudeM: r.altitude_m ?? null,
+      paceMinPerKm,
+      heartRate: r.heart_rate ?? null,
+      power: r.power ?? null,
+      cadence: r.cadence ?? null,
+      temperatureC: r.temperature_c ?? null,
+      timestampMs: r.timestamp_ms,
+    };
   });
 
-  const hrValues = records.map((r) => r.heart_rate).filter((n): n is number => typeof n === "number");
-  const sortedHr = [...hrValues].sort((a, b) => a - b);
-  const hrQ1 = quantile(sortedHr, 0.25);
-  const hrQ2 = quantile(sortedHr, 0.5);
-  const hrQ3 = quantile(sortedHr, 0.75);
+  const hasPowerData = records.some((r) => typeof r.power === "number" && r.power > 0);
+  const hasHeartRateData = records.some((r) => typeof r.heart_rate === "number" && r.heart_rate > 0);
 
-  const zoneBuckets = [0, 0, 0, 0];
-  for (const hr of hrValues) {
-    if (hr <= hrQ1) zoneBuckets[0] += 1;
-    else if (hr <= hrQ2) zoneBuckets[1] += 1;
-    else if (hr <= hrQ3) zoneBuckets[2] += 1;
-    else zoneBuckets[3] += 1;
-  }
+  const lapMarkers = lapTimestampsUtc
+    .slice(1)
+    .map((ts, idx) => {
+      const parsed = Date.parse(ts);
+      if (!Number.isFinite(parsed)) return null;
+      const relMs = parsed - t0;
+      if (relMs < 0) return null;
+      return { xAxis: relMs, name: `Lap ${idx + 1}` };
+    })
+    .filter((m): m is { xAxis: number; name: string } => m !== null);
 
-  const bucketSize = Math.max(1, Math.floor(records.length / 18));
-  const bars = [] as Array<[string, number, number]>;
-  for (let i = 0; i < records.length; i += bucketSize) {
-    const slice = records.slice(i, i + bucketSize);
-    const label = new Date(slice[0].timestamp_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    bars.push([label, safeAvg(slice.map((r) => r.cadence)), safeAvg(slice.map((r) => r.power))]);
-  }
+  const hrValues = records
+    .map((r) => r.heart_rate)
+    .filter((n): n is number => typeof n === "number" && n > 0);
+  const maxHrObserved = hrValues.length ? Math.max(...hrValues) : 0;
 
-  const heatRows = ["HR", "Speed", "Cadence", "Power", "Temp"];
-  const heatData: Array<[number, number, number]> = [];
-  const heatBins = 24;
-  const segment = Math.max(1, Math.floor(records.length / heatBins));
-
-  for (let x = 0; x < heatBins; x += 1) {
-    const slice = records.slice(x * segment, (x + 1) * segment);
-    const metrics = [
-      safeAvg(slice.map((r) => r.heart_rate)),
-      safeAvg(slice.map((r) => (r.speed_m_s ? r.speed_m_s * 3.6 : undefined))),
-      safeAvg(slice.map((r) => r.cadence)),
-      safeAvg(slice.map((r) => r.power)),
-      safeAvg(slice.map((r) => r.temperature_c))
-    ];
-    for (let y = 0; y < metrics.length; y += 1) {
-      heatData.push([x, y, Number(metrics[y].toFixed(2))]);
+  const zoneMinutes = [0, 0, 0, 0, 0];
+  if (maxHrObserved > 0) {
+    for (let i = 0; i < records.length - 1; i += 1) {
+      const hr = records[i].heart_rate;
+      if (typeof hr !== "number" || hr <= 0) continue;
+      const dtMin = Math.max(0, (records[i + 1].timestamp_ms - records[i].timestamp_ms) / 60000);
+      const ratio = hr / maxHrObserved;
+      if (ratio < 0.6) zoneMinutes[0] += dtMin;
+      else if (ratio < 0.7) zoneMinutes[1] += dtMin;
+      else if (ratio < 0.8) zoneMinutes[2] += dtMin;
+      else if (ratio < 0.9) zoneMinutes[3] += dtMin;
+      else zoneMinutes[4] += dtMin;
     }
   }
 
   const timelineOption = {
-    tooltip: { trigger: "axis", ...tooltipStyle },
+    tooltip: {
+      trigger: "axis",
+      ...tooltipStyle,
+      formatter: (params: any[]) => {
+        const p = params?.[0];
+        const rel = p?.value?.[0] ?? 0;
+        let html = `<div><strong>${formatRelTime(rel)}</strong></div>`;
+        for (const row of params) {
+          if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
+            html += `<div>${row.marker} ${row.seriesName}: <strong>${Number(row.value[1]).toFixed(2)}</strong></div>`;
+          }
+        }
+        return html;
+      }
+    },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
-    grid: { left: 50, right: 44, top: 42, bottom: 46 },
+    grid: { left: 50, right: 16, top: 42, bottom: 46 },
     xAxis: {
-      type: "time",
-      axisLabel: { color: axisColor, fontSize: 11 },
+      type: "value",
+      axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
       axisLine: { lineStyle: { color: gridLine } },
       splitLine: { show: false },
     },
-    yAxis: [
-      {
-        type: "value", name: "km/h",
-        nameTextStyle: { color: axisColor, fontSize: 11 },
-        axisLabel: { color: axisColor, fontSize: 11 },
-        splitLine: { lineStyle: { color: gridLine } },
-      },
-      {
-        type: "value", name: "m",
-        nameTextStyle: { color: axisColor, fontSize: 11 },
-        axisLabel: { color: axisColor, fontSize: 11 },
-        splitLine: { show: false },
-      },
-    ],
+    yAxis: {
+      type: "value", name: "km/h",
+      nameTextStyle: { color: axisColor, fontSize: 11 },
+      axisLabel: { color: axisColor, fontSize: 11 },
+      splitLine: { lineStyle: { color: gridLine } },
+    },
     dataZoom: [
       {
         type: "inside",
@@ -138,57 +151,128 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
         name: "Speed", type: "line", smooth: true, showSymbol: false,
         lineStyle: { width: 2, color: "#38bdf8" },
         areaStyle: { color: isDark ? "rgba(56, 189, 248, 0.1)" : "rgba(56, 189, 248, 0.15)" },
-        data: timeline.map((d) => [d[0], d[1]]),
+        data: timeline.map((d) => [d.relMs, d.speedKmh]),
+        markLine: lapMarkers.length ? {
+          symbol: ["none", "none"],
+          lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
+          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          data: lapMarkers,
+        } : undefined,
       },
+    ],
+  };
+
+  const elevationOption = {
+    tooltip: {
+      trigger: "axis",
+      ...tooltipStyle,
+      formatter: (params: any[]) => {
+        const p = params?.[0];
+        const rel = p?.value?.[0] ?? 0;
+        const val = p?.value?.[1];
+        return `<div><strong>${formatRelTime(rel)}</strong></div><div>${p?.marker ?? ""} Elevation: <strong>${val == null ? "--" : Number(val).toFixed(2)} m</strong></div>`;
+      }
+    },
+    legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
+    grid: { left: 50, right: 16, top: 42, bottom: 46 },
+    xAxis: {
+      type: "value",
+      axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
+      axisLine: { lineStyle: { color: gridLine } },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value", name: "m",
+      nameTextStyle: { color: axisColor, fontSize: 11 },
+      axisLabel: { color: axisColor, fontSize: 11 },
+      splitLine: { lineStyle: { color: gridLine } },
+    },
+    dataZoom: [
       {
-        name: "Altitude", type: "line", yAxisIndex: 1, smooth: true, showSymbol: false,
+        type: "inside",
+        zoomOnMouseWheel: "ctrl",
+        moveOnMouseWheel: false,
+        start: zoomRange?.start ?? 0,
+        end: zoomRange?.end ?? 100,
+      },
+    ],
+    series: [
+      {
+        name: "Elevation", type: "line", smooth: true, showSymbol: false,
         lineStyle: { width: 1.5, color: "#f97316" },
-        data: timeline.map((d) => [d[0], d[2]]),
+        data: timeline.map((d) => [d.relMs, d.altitudeM]),
+        markLine: lapMarkers.length ? {
+          symbol: ["none", "none"],
+          lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
+          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          data: lapMarkers,
+        } : undefined,
       },
     ],
   };
 
   const zoneOption = {
-    tooltip: { trigger: "item", ...tooltipStyle },
+    tooltip: {
+      trigger: "item",
+      ...tooltipStyle,
+      formatter: (p: any) => `${p.marker} ${p.name}: <strong>${Number(p.value).toFixed(2)} min</strong>`
+    },
     legend: { bottom: 0, textStyle: { color: axisColor, fontSize: 12 } },
     series: [
       {
         type: "pie",
         radius: ["38%", "72%"],
         itemStyle: { borderRadius: 8, borderColor: "transparent", borderWidth: 2 },
-        label: { color: axisColor, fontSize: 12 },
+        label: { color: axisColor, fontSize: 12, formatter: (p: any) => `${p.name}\n${Number(p.value).toFixed(1)} min` },
         data: [
-          { name: "Recovery", value: zoneBuckets[0], itemStyle: { color: "#0ea5e9" } },
-          { name: "Aerobic", value: zoneBuckets[1], itemStyle: { color: "#10b981" } },
-          { name: "Tempo", value: zoneBuckets[2], itemStyle: { color: "#f59e0b" } },
-          { name: "Threshold", value: zoneBuckets[3], itemStyle: { color: "#ef4444" } },
+          { name: "Z1 <60%", value: zoneMinutes[0], itemStyle: { color: "#38bdf8" } },
+          { name: "Z2 60-70%", value: zoneMinutes[1], itemStyle: { color: "#22c55e" } },
+          { name: "Z3 70-80%", value: zoneMinutes[2], itemStyle: { color: "#f59e0b" } },
+          { name: "Z4 80-90%", value: zoneMinutes[3], itemStyle: { color: "#f97316" } },
+          { name: "Z5 >90%", value: zoneMinutes[4], itemStyle: { color: "#ef4444" } },
         ],
       },
     ],
   };
 
-  const barsOption = {
-    tooltip: { trigger: "axis", ...tooltipStyle },
+  const cadenceOption = {
+    tooltip: {
+      trigger: "axis",
+      ...tooltipStyle,
+      formatter: (params: any[]) => {
+        const p = params?.[0];
+        const rel = p?.value?.[0] ?? 0;
+        let html = `<div><strong>${formatRelTime(rel)}</strong></div>`;
+        for (const row of params) {
+          if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
+            const unit = row.seriesName === "Cadence" ? " rpm" : " W";
+            html += `<div>${row.marker} ${row.seriesName}: <strong>${Number(row.value[1]).toFixed(2)}${unit}</strong></div>`;
+          }
+        }
+        return html;
+      }
+    },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
-    grid: { left: 38, right: 14, top: 44, bottom: 44 },
+    grid: { left: 44, right: hasPowerData ? 44 : 16, top: 44, bottom: 44 },
     xAxis: {
-      type: "category",
-      axisLabel: { color: axisColor, rotate: 25, interval: 2, fontSize: 11 },
-      data: bars.map((b) => b[0]),
+      type: "value",
+      axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
+      axisLine: { lineStyle: { color: gridLine } },
+      splitLine: { show: false },
     },
     yAxis: [
       {
-        type: "value", name: "cad",
+        type: "value", name: "rpm",
         nameTextStyle: { color: axisColor, fontSize: 11 },
         axisLabel: { color: axisColor, fontSize: 11 },
         splitLine: { lineStyle: { color: gridLine } },
       },
-      {
+      ...(hasPowerData ? [{
         type: "value", name: "W",
         nameTextStyle: { color: axisColor, fontSize: 11 },
         axisLabel: { color: axisColor, fontSize: 11 },
         splitLine: { show: false },
-      },
+      }] : []),
     ],
     dataZoom: [
       {
@@ -201,15 +285,21 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
     ],
     series: [
       {
-        name: "Cadence", type: "bar", barMaxWidth: 16,
-        data: bars.map((b) => Number(b[1].toFixed(1))),
-        itemStyle: { color: "#22d3ee", borderRadius: [3, 3, 0, 0] },
+        name: "Cadence", type: "line", smooth: true, showSymbol: false,
+        lineStyle: { width: 2, color: "#22d3ee" },
+        data: timeline.map((d) => [d.relMs, d.cadence]),
+        markLine: lapMarkers.length ? {
+          symbol: ["none", "none"],
+          lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
+          label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
+          data: lapMarkers,
+        } : undefined,
       },
-      {
+      ...(hasPowerData ? [{
         name: "Power", type: "line", yAxisIndex: 1, smooth: true, showSymbol: false,
-        data: bars.map((b) => Number(b[2].toFixed(1))),
+        data: timeline.map((d) => [d.relMs, d.power]),
         lineStyle: { color: "#f97316" },
-      },
+      }] : []),
     ],
   };
 
@@ -242,14 +332,57 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
     ],
   };
 
+  const totalRelMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
+  const heatBins = Math.max(1, Math.ceil(totalRelMs / 60000));
+  const heatRows = hasPowerData ? ["HR", "Speed", "Cadence", "Power", "Temp"] : ["HR", "Speed", "Cadence", "Temp"];
+  const heatData: Array<[number, number, number]> = [];
+
+  for (let x = 0; x < heatBins; x += 1) {
+    const startMs = x * 60000;
+    const endMs = startMs + 60000;
+    const slice = timeline.filter((d) => d.relMs >= startMs && d.relMs < endMs);
+    const metrics = hasPowerData
+      ? [
+          safeAvg(slice.map((r) => r.heartRate)),
+          safeAvg(slice.map((r) => r.speedKmh)),
+          safeAvg(slice.map((r) => r.cadence)),
+          safeAvg(slice.map((r) => r.power)),
+          safeAvg(slice.map((r) => r.temperatureC)),
+        ]
+      : [
+          safeAvg(slice.map((r) => r.heartRate)),
+          safeAvg(slice.map((r) => r.speedKmh)),
+          safeAvg(slice.map((r) => r.cadence)),
+          safeAvg(slice.map((r) => r.temperatureC)),
+        ];
+
+    for (let y = 0; y < metrics.length; y += 1) {
+      heatData.push([x, y, Number((metrics[y] ?? 0).toFixed(2))]);
+    }
+  }
 
   const heatOption = {
-    tooltip: { position: "top", ...tooltipStyle },
+    tooltip: {
+      position: "top",
+      ...tooltipStyle,
+      formatter: (p: any) => {
+        const minuteIdx = Number(p.value[0]);
+        const rowIdx = Number(p.value[1]);
+        const value = Number(p.value[2]);
+        const startMs = minuteIdx * 60000;
+        const endMs = (minuteIdx + 1) * 60000;
+        return `<div><strong>${heatRows[rowIdx]}</strong></div><div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${value.toFixed(2)}</strong></div>`;
+      },
+    },
     grid: { left: 58, right: 14, top: 16, bottom: 44 },
     xAxis: {
       type: "category",
-      data: Array.from({ length: heatBins }, (_, i) => `${i + 1}`),
-      axisLabel: { color: axisColor, interval: 3, fontSize: 11 },
+      data: Array.from({ length: heatBins }, (_, i) => formatRelTime(i * 60000)),
+      axisLabel: {
+        color: axisColor,
+        interval: Math.max(0, Math.floor(heatBins / 14)),
+        fontSize: 11,
+      },
     },
     yAxis: {
       type: "category",
@@ -288,25 +421,35 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange }: Pr
   return (
     <section className="insight-grid">
       <article className="panel">
-        <h3>Speed + Elevation</h3>
+        <h3>Speed Trend</h3>
         <ReactECharts option={timelineOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
       </article>
+      {hasPowerData && hasHeartRateData && (
+        <article className="panel">
+          <h3>Heart Rate Zone Time</h3>
+          <ReactECharts option={zoneOption} notMerge style={{ height: 280, width: "100%" }} />
+        </article>
+      )}
       <article className="panel">
-        <h3>Heart-Rate Zones</h3>
-        <ReactECharts option={zoneOption} notMerge style={{ height: 280, width: "100%" }} />
+        <h3>{hasPowerData ? "Cadence & Power" : "Cadence"}</h3>
+        <ReactECharts option={cadenceOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
       </article>
-      <article className="panel">
-        <h3>Cadence & Power</h3>
-        <ReactECharts option={barsOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
-      </article>
-      <article className="panel">
-        <h3>Effort Heatmap</h3>
-        <ReactECharts option={heatOption} notMerge style={{ height: 280, width: "100%" }} />
-      </article>
-      <article className="panel">
-        <h3>Power vs Heart Rate</h3>
-        <ReactECharts option={scatterOption} notMerge style={{ height: 280, width: "100%" }} />
-      </article>
+      <div className="insight-pair-row">
+        <article className="panel">
+          <h3>Effort Heatmap</h3>
+          <ReactECharts option={heatOption} notMerge style={{ height: 280, width: "100%" }} />
+        </article>
+        <article className="panel">
+          <h3>Elevation</h3>
+          <ReactECharts option={elevationOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
+        </article>
+      </div>
+      {hasPowerData && hasHeartRateData && (
+        <article className="panel">
+          <h3>Power vs Heart Rate</h3>
+          <ReactECharts option={scatterOption} notMerge style={{ height: 280, width: "100%" }} />
+        </article>
+      )}
     </section>
   );
 }

@@ -10,8 +10,11 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
   return (
     <div className="donation-banner" role="region" aria-label="Supporter banner">
       <div className="donation-banner-content">
-        <span className="donation-banner-text">
+        <span className="donation-banner-text donation-banner-text--full">
           No subscriptions. No advertisements. You are in control of your data. Support us and get your
+        </span>
+        <span className="donation-banner-text donation-banner-text--compact">
+          Support us and get your
         </span>
         <a
           className="donation-banner-link"

@@ -39,6 +39,17 @@
   --overlay: rgba(0, 0, 0, 0.4);
   --badge-bg: rgba(8, 145, 178, 0.1);
   --badge-text: #0891b2;
+  --telemetry-overlay-bg: rgba(255, 255, 255, 0.9);
+  --telemetry-overlay-border: rgba(15, 23, 42, 0.18);
+  --telemetry-overlay-title: #334155;
+  --telemetry-overlay-label-bg: rgba(15, 23, 42, 0.08);
+  --telemetry-overlay-label-border: rgba(15, 23, 42, 0.2);
+  --telemetry-overlay-label-text: #1e293b;
+  --telemetry-overlay-value: #0f172a;
+  --telemetry-overlay-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  --telemetry-overlay-title-shadow: none;
+  --telemetry-overlay-label-shadow: none;
+  --telemetry-overlay-value-shadow: none;
 }
 
 :root[data-theme="dark"] {
@@ -72,6 +83,17 @@
   --overlay: rgba(0, 0, 0, 0.65);
   --badge-bg: rgba(34, 211, 238, 0.1);
   --badge-text: #67e8f9;
+  --telemetry-overlay-bg: rgba(10, 14, 22, 0.82);
+  --telemetry-overlay-border: rgba(255, 255, 255, 0.2);
+  --telemetry-overlay-title: rgba(235, 241, 255, 0.92);
+  --telemetry-overlay-label-bg: rgba(34, 46, 65, 0.95);
+  --telemetry-overlay-label-border: rgba(255, 255, 255, 0.2);
+  --telemetry-overlay-label-text: #f8fbff;
+  --telemetry-overlay-value: #ffffff;
+  --telemetry-overlay-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --telemetry-overlay-title-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  --telemetry-overlay-label-shadow: 0 1px 1px rgba(0, 0, 0, 0.75);
+  --telemetry-overlay-value-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 /* ── Reset & Base ──────────────────────────────────────────────────── */
@@ -1263,6 +1285,10 @@ button:focus-visible {
   display: flex;
 }
 
+.mini-stat .mini-icon.danger {
+  color: var(--danger);
+}
+
 .mini-stat .mini-value {
   font-size: 1.1rem;
   font-weight: 700;
@@ -1298,12 +1324,50 @@ button:focus-visible {
   font-size: 0.9rem;
 }
 
+.insight-pair-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
 /* ── Summary / Compact Grid ────────────────────────────────────────── */
 
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.65rem;
+}
+
+.overview-contribution-row {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.overview-contribution-main,
+.overview-contribution-side {
+  min-width: 0;
+}
+
+.overview-contribution-main .panel,
+.overview-contribution-side .panel {
+  height: 308px;
+}
+
+.overview-activity-contribution-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-activity-contribution-panel .overview-heatmap-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.overview-sport-donut-panel h3 {
+  margin-bottom: 0.35rem;
 }
 
 .summary-card {
@@ -1348,6 +1412,7 @@ button:focus-visible {
   display: flex;
   gap: 0.6rem;
   align-items: flex-end;
+  flex-wrap: wrap;
 }
 
 .map-control {
@@ -1371,6 +1436,18 @@ button:focus-visible {
   width: auto;
 }
 
+.map-toggle-btn {
+  font-size: 0.72rem;
+  padding: 0.32rem 0.6rem;
+  min-height: 31px;
+}
+
+.map-toggle-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
 .map-canvas {
   width: 100%;
   height: 380px;
@@ -1392,6 +1469,84 @@ button:focus-visible {
   padding: 0.35rem 0.6rem;
   font-size: 0.75rem;
   backdrop-filter: blur(4px);
+}
+
+.map-playback-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.map-playback-btn,
+.map-playback-speed {
+  font-size: 0.74rem;
+  padding: 0.32rem 0.6rem;
+  min-height: 31px;
+}
+
+.map-playback-range {
+  width: 100%;
+}
+
+.map-playback-time {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.telemetry-overlay {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 4;
+  min-width: 240px;
+  max-width: min(340px, calc(100% - 24px));
+  background: var(--telemetry-overlay-bg);
+  border: 1px solid var(--telemetry-overlay-border);
+  border-radius: 10px;
+  padding: 0.5rem 0.55rem;
+  backdrop-filter: blur(8px) saturate(1.2);
+  box-shadow: var(--telemetry-overlay-shadow);
+}
+
+.telemetry-overlay-title {
+  font-size: 0.68rem;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+  color: var(--telemetry-overlay-title);
+  text-shadow: var(--telemetry-overlay-title-shadow);
+  margin-bottom: 0.35rem;
+}
+
+.telemetry-overlay-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem 0.55rem;
+}
+
+.telemetry-overlay-grid div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.telemetry-overlay-grid span {
+  font-size: 0.68rem;
+  color: var(--telemetry-overlay-label-text);
+  background: var(--telemetry-overlay-label-bg);
+  border: 1px solid var(--telemetry-overlay-label-border);
+  border-radius: 999px;
+  padding: 0.06rem 0.34rem;
+  line-height: 1.15;
+  text-shadow: var(--telemetry-overlay-label-shadow);
+}
+
+.telemetry-overlay-grid strong {
+  font-size: 0.72rem;
+  color: var(--telemetry-overlay-value);
+  font-weight: 600;
+  text-shadow: var(--telemetry-overlay-value-shadow);
 }
 
 .overview-map-canvas {
@@ -1704,6 +1859,10 @@ button:focus-visible {
   color: #2a3957;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+.donation-banner-text--compact {
+  display: none;
 }
 
 .donation-banner-link {
@@ -2391,10 +2550,25 @@ button:focus-visible {
 
   .detail-grid { grid-template-columns: 1fr; }
   .insight-grid { grid-template-columns: 1fr; }
+  .insight-pair-row { grid-template-columns: 1fr; }
   .summary-grid { grid-template-columns: 1fr; }
   .detail-stats-strip { gap: 0.75rem; }
   .map-header { flex-direction: column; align-items: flex-start; }
   .map-controls { width: 100%; }
+  .overview-contribution-row {
+    grid-template-columns: 1fr;
+  }
+  .overview-contribution-main .panel,
+  .overview-contribution-side .panel {
+    height: auto;
+  }
+  .map-playback-bar {
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+  }
+  .map-playback-time {
+    justify-self: flex-start;
+  }
 }
 
 @media (max-width: 640px) {
@@ -2405,8 +2579,31 @@ button:focus-visible {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
   .stat-card .stat-value { font-size: 1.2rem; }
   .map-canvas { height: 280px; }
+  .telemetry-overlay {
+    left: 12px;
+    right: 12px;
+    top: 12px;
+    bottom: auto;
+    min-width: 0;
+  }
   .overview-map-canvas { height: 300px; }
-  .donation-banner { flex-direction: column; align-items: flex-start; }
+  .donation-banner {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 0.42rem 2rem 0.42rem 0.7rem;
+  }
+  .donation-banner-content {
+    width: 100%;
+    justify-content: center;
+    gap: 0.3rem;
+  }
+  .donation-banner-text--full {
+    display: none;
+  }
+  .donation-banner-text--compact {
+    display: inline;
+  }
   .settings-grid { grid-template-columns: 1fr; }
   .supporter-box { flex-direction: column; align-items: flex-start; }
   .detail-title-row { flex-direction: column; align-items: flex-start; }

@@ -68,6 +68,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const theme = useSettingsStore((s) => s.theme);
+  const selectedStyle = mapStyle === "default" ? theme : mapStyle;
 
   const geojson = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(() => {
     const features: GeoJSON.Feature<GeoJSON.Point>[] = records
@@ -110,7 +111,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
         type: "geojson",
         data: geojson,
         cluster: true,
-        clusterRadius: 45,
+        clusterRadius: 38,
         clusterMaxZoom: 11,
       });
     }
@@ -123,7 +124,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
         maxzoom: 11,
         paint: {
           "heatmap-weight": 1,
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.7, 11, 1.6],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.45, 11, 1.1],
           "heatmap-color": [
             "interpolate",
             ["linear"],
@@ -131,16 +132,16 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
             0,
             "rgba(0,0,0,0)",
             0.2,
-            "rgba(74, 222, 128, 0.35)",
+            "rgba(56, 189, 248, 0.12)",
             0.45,
-            "rgba(132, 204, 22, 0.55)",
+            "rgba(14, 165, 233, 0.2)",
             0.7,
-            "rgba(250, 204, 21, 0.7)",
+            "rgba(6, 182, 212, 0.3)",
             1,
-            "rgba(239, 68, 68, 0.85)",
+            "rgba(8, 145, 178, 0.4)",
           ],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 8, 11, 26],
-          "heatmap-opacity": 0.95,
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 4, 11, 14],
+          "heatmap-opacity": 0.7,
         },
       });
     }
@@ -154,18 +155,29 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
         filter: ["has", "point_count"],
         paint: {
           "circle-color": [
-            "step",
-            ["get", "point_count"],
-            "#22d3ee",
-            25,
-            "#facc15",
-            80,
-            "#ef4444",
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["ln", ["+", ["get", "point_count"], 1]], 0],
+            0,
+            "rgba(56, 189, 248, 0.70)",
+            2,
+            "rgba(14, 165, 233, 0.78)",
+            4,
+            "rgba(8, 145, 178, 0.86)",
           ],
-          "circle-radius": ["step", ["get", "point_count"], 12, 25, 16, 80, 22],
-          "circle-opacity": 0.9,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "rgba(255,255,255,0.65)",
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            0,
+            ["step", ["get", "point_count"], 4, 25, 5, 80, 6],
+            11,
+            ["step", ["get", "point_count"], 6, 25, 7.5, 80, 9],
+          ],
+          "circle-opacity": 0.84,
+          "circle-blur": 0.45,
+          "circle-stroke-width": 0.6,
+          "circle-stroke-color": "rgba(255,255,255,0.58)",
         },
       });
     }
@@ -283,17 +295,16 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
     <div className="panel">
       <div className="map-header" style={{ marginBottom: "0.6rem" }}>
         <div>
-          <h3>Explored Locations</h3>
+          <h3 style={{ marginBottom: "0.32rem" }}>Explored Locations</h3>
           <p className="panel-subtitle">GPS density heatmap with auto-clustering at low zoom levels</p>
         </div>
         <div className="map-controls">
           <label className="map-control">
             <span className="small">Style</span>
-            <select value={mapStyle} onChange={(e) => setMapStyle(e.target.value as MapStyle)}>
-              <option value="default">Default</option>
-              <option value="openstreet">OpenStreet</option>
-              <option value="topo">Topo</option>
-              <option value="satellite">Satellite</option>
+            <select value={selectedStyle} onChange={(e) => setMapStyle(e.target.value as MapStyle)}>
+              {Object.entries(BASEMAPS).map(([value, info]) => (
+                <option key={value} value={value}>{info.label}</option>
+              ))}
             </select>
           </label>
         </div>

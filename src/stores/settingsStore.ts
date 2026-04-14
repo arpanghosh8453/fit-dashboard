@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 type Theme = "light" | "dark";
 type DistanceUnit = "km" | "mi";
 type TimeFormat = "12h" | "24h";
-export type MapStyle = "default" | "openstreet" | "topo" | "satellite";
+export type MapStyle = "default" | "light" | "dark" | "openstreet" | "topo" | "satellite";
 
 type SettingsState = {
   theme: Theme;

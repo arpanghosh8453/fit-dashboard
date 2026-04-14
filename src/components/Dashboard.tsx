@@ -7,6 +7,8 @@ import { CompareCharts } from "./CompareCharts";
 import { ActivityInsights } from "./ActivityInsights";
 import { ActivityContributionHeatmap } from "./ActivityContributionHeatmap";
 import { OverviewLocationMap } from "./OverviewLocationMap";
+import { OverviewSportTypeDonut } from "./OverviewSportTypeDonut";
+import { OverviewWeeklyTrend } from "./OverviewWeeklyTrend";
 import { DatePickerPopover } from "./DatePickerPopover";
 import { DateRange } from "react-day-picker";
 import { DonationBanner } from "./DonationBanner";
@@ -126,7 +128,7 @@ function IconActivity() {
   return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>;
 }
 function IconDistance() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><path d="M18 6L6 18" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="18" r="3" /></svg>;
+  return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z" /><circle cx="12" cy="10" r="2.6" /></svg>;
 }
 function IconClock() {
   return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>;
@@ -135,7 +137,7 @@ function IconSport() {
   return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>;
 }
 function IconSpeed() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><path d="M12 12m-10 0a10 10 0 1 0 20 0" /><path d="M12 12l4-4" /><circle cx="12" cy="12" r="1" /></svg>;
+  return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><path d="M13 2L4 14h7l-1 8 10-12h-7l1-8z" /></svg>;
 }
 function IconHeart() {
   return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0016.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 002 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></svg>;
@@ -234,7 +236,7 @@ export function Dashboard({ onLogout }: Props) {
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [isFilterOpen, setIsFilterOpen] = useState(true);
-  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(true);
   const [minDurationMinutes, setMinDurationMinutes] = useState("");
   const [maxDurationMinutes, setMaxDurationMinutes] = useState("");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
@@ -1268,7 +1270,14 @@ export function Dashboard({ onLogout }: Props) {
                 <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDurationShort(avgDuration)}</div><div className="stat-label">Avg Duration / Activity</div></div>
                 <div className="stat-card"><div className="stat-icon"><IconDevice /></div><div className="stat-value">{filteredDevices.length}</div><div className="stat-label">Devices</div></div>
               </div>
-              <ActivityContributionHeatmap activities={filtered} />
+              <div className="overview-contribution-row">
+                <div className="overview-contribution-main">
+                  <ActivityContributionHeatmap activities={filtered} />
+                </div>
+                <div className="overview-contribution-side">
+                  <OverviewSportTypeDonut activities={filtered} theme={theme} />
+                </div>
+              </div>
               {overviewLoading ? (
                 <div className="panel">
                   <h3>Flight Locations</h3>
@@ -1277,6 +1286,7 @@ export function Dashboard({ onLogout }: Props) {
               ) : (
                 <OverviewLocationMap records={overviewRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} />
               )}
+              <OverviewWeeklyTrend activities={filtered} distanceUnit={distanceUnit} theme={theme} />
             </>
             )
           ) : tab === "compare" ? (
@@ -1298,7 +1308,7 @@ export function Dashboard({ onLogout }: Props) {
                 <div className="detail-stats-strip">
                   {detailStats.map((s) => (
                     <div key={s.key} className="mini-stat">
-                      <span className="mini-icon">
+                      <span className={`mini-icon ${s.key === "max_hr" ? "danger" : ""}`}>
                         {s.icon === "clock" && <IconClock />}
                         {s.icon === "distance" && <IconDistance />}
                         {s.icon === "speed" && <IconSpeed />}
@@ -1315,10 +1325,10 @@ export function Dashboard({ onLogout }: Props) {
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>Heart Rate and Pace</h3><ActivityChart records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} /></div>
+                <div className="panel"><h3>Heart Rate and Pace</h3><ActivityChart records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} /></div>
                 <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
               </div>
-              <ActivityInsights records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} />
+              <ActivityInsights records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} />
             </>
           ) : (
             <div className="empty-state">

@@ -76,7 +76,7 @@ export function ActivityContributionHeatmap({ activities }: Props) {
   const rangeLabel = `${startDate.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} - ${endDate.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`;
 
   return (
-    <div className="panel">
+    <div className="panel overview-activity-contribution-panel">
       <div className="overview-heatmap-head">
         <h3>Activity Contributions</h3>
         <span className="small">{rangeLabel}</span>

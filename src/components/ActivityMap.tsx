@@ -12,6 +12,7 @@ type Props = {
 };
 
 type PathColorMode = "solid" | "speed" | "heart_rate" | "cadence" | "altitude" | "power" | "temperature" | "time";
+const PLAYBACK_SPEEDS = [1, 2, 4, 8] as const;
 
 const PATH_COLOR_OPTIONS: { value: PathColorMode; label: string }[] = [
   { value: "solid", label: "Solid" },
@@ -245,8 +246,7 @@ function buildTooltipHtml(props: Record<string, any>, distanceUnit: "km" | "mi")
   const elapsed = asFiniteNumber(props.elapsed_s);
 
   const fmt2 = (value: number): string => {
-    const fixed = value.toFixed(2);
-    return fixed.replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+    return value.toFixed(2);
   };
 
   const iconSvg = (kind: "speed" | "heart" | "elevation" | "cadence" | "power" | "temp" | "duration") => {
@@ -294,12 +294,18 @@ function buildTooltipHtml(props: Record<string, any>, distanceUnit: "km" | "mi")
   return `<div class="map-tooltip">${rows.join("")}</div>`;
 }
 
+function formatMetric(value: number | null | undefined, digits = 1): string {
+  if (!Number.isFinite(value)) return "--";
+  return Number(value).toFixed(digits).replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+}
+
 /* ── Component ───────────────────────────────────────────────────── */
 
 const SOURCE_ID = "activity-route";
 const HIT_SOURCE_ID = "activity-route-hit-source";
 const MARKER_SOURCE_ID = "activity-route-markers";
 const LAP_SOURCE_ID = "activity-route-lap-markers";
+const SKY_LAYER_ID = "activity-sky-layer";
 const OUTLINE_LAYER_ID = "activity-route-outline-layer";
 const LAYER_ID = "activity-route-layer";
 const HIT_LAYER_ID = "activity-route-hit";
@@ -351,9 +357,22 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const theme = useSettingsStore((s) => s.theme);
   const distanceUnit = useSettingsStore((s) => s.distanceUnit);
+  const selectedStyle = mapStyle === "default" ? theme : mapStyle;
 
   const [pathColorMode, setPathColorMode] = useState<PathColorMode>("heart_rate");
+  const [terrainEnabled, setTerrainEnabled] = useState(false);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
+  const [timelineIndex, setTimelineIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeedIndex, setPlaybackSpeedIndex] = useState(0);
   const pathColorModeRef = useRef(pathColorMode);
+  const terrainEnabledRef = useRef(terrainEnabled);
+  const telemetryEnabledRef = useRef(telemetryEnabled);
+  const timelineIndexRef = useRef(timelineIndex);
+  const animationFrameRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number | null>(null);
+  const playheadFloatRef = useRef(0);
+  const playheadElapsedMsRef = useRef(0);
 
   const gpsRecords = useMemo(
     () => records
@@ -370,13 +389,172 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
   const gpsRecordsRef = useRef(gpsRecords);
   const coordinatesRef = useRef(coordinates);
   const distanceUnitRef = useRef(distanceUnit);
+  const maxTimelineIndex = Math.max(0, coordinates.length - 1);
+  const playbackSpeed = PLAYBACK_SPEEDS[playbackSpeedIndex];
+
+  const firstTimestampMs = useMemo(
+    () => gpsRecords.find((r) => Number.isFinite(r.timestamp_ms))?.timestamp_ms ?? 0,
+    [gpsRecords]
+  );
+
+  const totalElapsedSeconds = useMemo(() => {
+    if (!gpsRecords.length) return 0;
+    const lastTsMs = gpsRecords[gpsRecords.length - 1].timestamp_ms;
+    if (!Number.isFinite(lastTsMs) || !Number.isFinite(firstTimestampMs)) return 0;
+    return Math.max(0, Math.round((lastTsMs - firstTimestampMs) / 1000));
+  }, [gpsRecords, firstTimestampMs]);
+  const totalElapsedMs = Math.max(0, totalElapsedSeconds * 1000);
+
+  const currentPoint = gpsRecords[Math.min(Math.max(timelineIndex, 0), Math.max(0, gpsRecords.length - 1))];
+  const currentElapsedSeconds = currentPoint && Number.isFinite(currentPoint.timestamp_ms)
+    ? Math.max(0, Math.round((currentPoint.timestamp_ms - firstTimestampMs) / 1000))
+    : 0;
+
+  const telemetryData = useMemo(() => {
+    if (!currentPoint) return null;
+    const speedKmh = (currentPoint.speed_m_s ?? 0) * 3.6;
+    const speedValue = distanceUnit === "mi" ? speedKmh / 1.609344 : speedKmh;
+    const speedUnit = distanceUnit === "mi" ? "mi/h" : "km/h";
+    return {
+      time: formatElapsed(currentElapsedSeconds),
+      speed: `${formatMetric(speedValue, 2)} ${speedUnit}`,
+      heartRate: currentPoint.heart_rate ? `${formatMetric(currentPoint.heart_rate, 0)} bpm` : "--",
+      altitude: currentPoint.altitude_m ? `${formatMetric(currentPoint.altitude_m, 0)} m` : "--",
+      cadence: currentPoint.cadence ? `${formatMetric(currentPoint.cadence, 0)} rpm` : "--",
+      power: currentPoint.power ? `${formatMetric(currentPoint.power, 0)} W` : "--",
+      temp: Number.isFinite(currentPoint.temperature_c) ? `${formatMetric(currentPoint.temperature_c, 1)} C` : "--",
+      point: `${timelineIndex + 1}/${Math.max(1, gpsRecords.length)}`,
+    };
+  }, [currentPoint, currentElapsedSeconds, distanceUnit, gpsRecords.length, timelineIndex]);
 
   useEffect(() => { coordinatesRef.current = coordinates; }, [coordinates]);
   useEffect(() => { gpsRecordsRef.current = gpsRecords; }, [gpsRecords]);
   useEffect(() => { distanceUnitRef.current = distanceUnit; }, [distanceUnit]);
   useEffect(() => { pathColorModeRef.current = pathColorMode; }, [pathColorMode]);
+  useEffect(() => { terrainEnabledRef.current = terrainEnabled; }, [terrainEnabled]);
+  useEffect(() => {
+    telemetryEnabledRef.current = telemetryEnabled;
+    if (telemetryEnabled) {
+      popupRef.current?.remove();
+    }
+  }, [telemetryEnabled]);
+  useEffect(() => {
+    timelineIndexRef.current = timelineIndex;
+    playheadFloatRef.current = timelineIndex;
+    const point = gpsRecords[Math.min(Math.max(timelineIndex, 0), Math.max(0, gpsRecords.length - 1))];
+    if (point && Number.isFinite(point.timestamp_ms)) {
+      playheadElapsedMsRef.current = Math.max(0, point.timestamp_ms - firstTimestampMs);
+    }
+  }, [timelineIndex, gpsRecords, firstTimestampMs]);
+
+  useEffect(() => {
+    const endIndex = Math.max(0, coordinates.length - 1);
+    timelineIndexRef.current = endIndex;
+    playheadFloatRef.current = endIndex;
+    playheadElapsedMsRef.current = totalElapsedMs;
+    setTimelineIndex(endIndex);
+    setIsPlaying(false);
+  }, [coordinates.length, totalElapsedMs]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      lastFrameTimeRef.current = null;
+      return;
+    }
+
+    if (coordinates.length < 2) {
+      setIsPlaying(false);
+      return;
+    }
+
+    const getIndexForElapsedMs = (elapsedMs: number): number => {
+      const points = gpsRecordsRef.current;
+      if (!points.length) return 0;
+      const targetTs = firstTimestampMs + Math.max(0, elapsedMs);
+      let lo = 0;
+      let hi = points.length - 1;
+
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (points[mid].timestamp_ms <= targetTs) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return lo;
+    };
+
+    const tick = (time: number) => {
+      if (lastFrameTimeRef.current === null) {
+        lastFrameTimeRef.current = time;
+      }
+      const deltaSeconds = (time - (lastFrameTimeRef.current ?? time)) / 1000;
+      lastFrameTimeRef.current = time;
+
+      const maxIndex = Math.max(0, coordinatesRef.current.length - 1);
+      const nextElapsedMs = playheadElapsedMsRef.current + (deltaSeconds * 1000 * PLAYBACK_SPEEDS[playbackSpeedIndex]);
+
+      if (nextElapsedMs >= totalElapsedMs) {
+        playheadElapsedMsRef.current = totalElapsedMs;
+        playheadFloatRef.current = maxIndex;
+        timelineIndexRef.current = maxIndex;
+        setTimelineIndex(maxIndex);
+        setIsPlaying(false);
+        return;
+      }
+
+      playheadElapsedMsRef.current = Math.max(0, nextElapsedMs);
+      const rounded = getIndexForElapsedMs(playheadElapsedMsRef.current);
+      playheadFloatRef.current = rounded;
+      if (rounded !== timelineIndexRef.current) {
+        timelineIndexRef.current = rounded;
+        setTimelineIndex(rounded);
+      }
+
+      animationFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      lastFrameTimeRef.current = null;
+    };
+  }, [isPlaying, playbackSpeedIndex, coordinates.length, firstTimestampMs, totalElapsedMs]);
 
   /* ── Draw route ─────────────────────────────────────────────── */
+
+  function applyTerrainState(map: maplibregl.Map, enabled: boolean) {
+    if (!enabled) {
+      map.setMaxPitch(0);
+      if (map.getLayer(SKY_LAYER_ID)) {
+        map.removeLayer(SKY_LAYER_ID);
+      }
+      map.easeTo({ pitch: 0, duration: 250 });
+      return;
+    }
+
+    map.setMaxPitch(85);
+
+    if (!map.getLayer(SKY_LAYER_ID)) {
+      map.addLayer({
+        id: SKY_LAYER_ID,
+        type: "sky",
+        paint: {
+          "sky-color": "#87CEEB",
+          "sky-horizon-blend": 0.5,
+        },
+      } as any);
+    }
+  }
 
   function drawRoute(map: maplibregl.Map, fitToRoute: boolean) {
     const coords = coordinatesRef.current;
@@ -399,36 +577,41 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
       return;
     }
 
-    const hitGeojson = buildColoredGeoJson(gpsRecs, coords, mode, solidPathColor);
-    const displayGeojson = buildSolidDisplayGeoJson(coords, solidPathColor);
-    const markerGeojson = buildMarkerGeoJson(coords);
-    const lapMarkerGeojson = buildLapMarkerGeoJson(gpsRecs, lapTimestampsUtc);
-    const gradientExpr = buildGradientExpression(gpsRecs, mode, solidPathColor);
+    const endIndex = Math.max(1, Math.min(coords.length - 1, timelineIndexRef.current));
+    const visibleCoords = coords.slice(0, endIndex + 1);
+    const visibleGpsRecs = gpsRecs.slice(0, endIndex + 1);
+
+    const hitGeojson = buildColoredGeoJson(visibleGpsRecs, visibleCoords, mode, solidPathColor);
+    const displayGeojson = buildSolidDisplayGeoJson(visibleCoords, solidPathColor);
+    const markerGeojson = buildMarkerGeoJson(visibleCoords);
+    const lapMarkerGeojson = buildLapMarkerGeoJson(visibleGpsRecs, lapTimestampsUtc);
+    const gradientExpr = buildGradientExpression(visibleGpsRecs, mode, solidPathColor);
+    const existingDisplay = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     const existingHit = map.getSource(HIT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     const existingMarkers = map.getSource(MARKER_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     const existingLapMarkers = map.getSource(LAP_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
 
-    // Always recreate the display source/layer so lineMetrics is guaranteed on hot reloads.
-    if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID);
-    if (map.getLayer(OUTLINE_LAYER_ID)) map.removeLayer(OUTLINE_LAYER_ID);
-    if (map.getSource(SOURCE_ID)) {
-      map.removeSource(SOURCE_ID);
+    if (existingDisplay) {
+      existingDisplay.setData(displayGeojson);
+    } else {
+      map.addSource(SOURCE_ID, { type: "geojson", data: displayGeojson, lineMetrics: true });
     }
-    map.addSource(SOURCE_ID, { type: "geojson", data: displayGeojson, lineMetrics: true });
 
     // Diffused black outline under the route for better edge contrast.
-    map.addLayer({
-      id: OUTLINE_LAYER_ID,
-      type: "line",
-      source: SOURCE_ID,
-      layout: { "line-cap": "round", "line-join": "round" },
-      paint: {
-        "line-width": 8,
-        "line-color": "#000000",
-        "line-opacity": 0.62,
-        "line-blur": 2.2,
-      }
-    });
+    if (!map.getLayer(OUTLINE_LAYER_ID)) {
+      map.addLayer({
+        id: OUTLINE_LAYER_ID,
+        type: "line",
+        source: SOURCE_ID,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-width": 8,
+          "line-color": "#000000",
+          "line-opacity": 0.62,
+          "line-blur": 2.2,
+        }
+      });
+    }
 
     if (existingHit) {
       existingHit.setData(hitGeojson);
@@ -448,17 +631,19 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
       map.addSource(LAP_SOURCE_ID, { type: "geojson", data: lapMarkerGeojson });
     }
 
-    map.addLayer({
-      id: LAYER_ID,
-      type: "line",
-      source: SOURCE_ID,
-      layout: { "line-cap": "round", "line-join": "round" },
-      paint: {
-        "line-width": 4,
-        "line-color": solidPathColor,
-        "line-opacity": 1
-      }
-    });
+    if (!map.getLayer(LAYER_ID)) {
+      map.addLayer({
+        id: LAYER_ID,
+        type: "line",
+        source: SOURCE_ID,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-width": 4,
+          "line-color": solidPathColor,
+          "line-opacity": 1
+        }
+      });
+    }
     map.setPaintProperty(LAYER_ID, "line-color", solidPathColor);
     map.setPaintProperty(LAYER_ID, "line-gradient", gradientExpr as any);
     map.setPaintProperty(LAYER_ID, "line-opacity", 1);
@@ -558,6 +743,21 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
     map.fitBounds(bounds, { padding: 40, maxZoom: 16, duration: 550 });
   }
 
+  function togglePlayback() {
+    if (coordinates.length < 2) return;
+    if (isPlaying) {
+      setIsPlaying(false);
+      return;
+    }
+    if (timelineIndexRef.current >= maxTimelineIndex) {
+      timelineIndexRef.current = 0;
+      playheadFloatRef.current = 0;
+      playheadElapsedMsRef.current = 0;
+      setTimelineIndex(0);
+    }
+    setIsPlaying(true);
+  }
+
   /* ── Map lifecycle ──────────────────────────────────────────── */
 
   useEffect(() => {
@@ -569,11 +769,15 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
       center: [0, 0],
       zoom: 2,
       minZoom: 5,
+      pitch: 0,
+      bearing: 0,
+      maxPitch: 0,
       cooperativeGestures: true,
     });
     mapRef.current = map;
 
     map.on("load", () => {
+      applyTerrainState(map, terrainEnabledRef.current);
       drawRoute(map, true);
     });
 
@@ -584,6 +788,11 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
     popupRef.current = popup;
 
     map.on("mousemove", HIT_LAYER_ID, (e) => {
+      if (telemetryEnabledRef.current) {
+        map.getCanvas().style.cursor = "";
+        popup.remove();
+        return;
+      }
       if (!e.features?.[0]) return;
       map.getCanvas().style.cursor = "crosshair";
       const props = e.features[0].properties as Record<string, any>;
@@ -614,6 +823,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
 
     const onIdle = () => {
       map.off("idle", onIdle);
+      applyTerrainState(map, terrainEnabledRef.current);
       drawRoute(map, false);
     };
     map.on("idle", onIdle);
@@ -622,6 +832,23 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
       map.off("idle", onIdle);
     };
   }, [mapStyle, theme]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const apply = () => {
+      applyTerrainState(map, terrainEnabled);
+    };
+
+    if (map.isStyleLoaded()) {
+      apply();
+    } else {
+      const onIdle = () => { map.off("idle", onIdle); apply(); };
+      map.on("idle", onIdle);
+      return () => { map.off("idle", onIdle); };
+    }
+  }, [terrainEnabled]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -648,6 +875,18 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
     }
   }, [pathColorMode]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (map.isStyleLoaded()) {
+      drawRoute(map, false);
+    } else {
+      const onIdle = () => { map.off("idle", onIdle); drawRoute(map, false); };
+      map.on("idle", onIdle);
+      return () => { map.off("idle", onIdle); };
+    }
+  }, [timelineIndex]);
+
   return (
     <section className="panel map-panel">
       <div className="map-header">
@@ -655,7 +894,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
         <div className="map-controls">
           <div className="map-control">
             <span>Style</span>
-            <select value={mapStyle} onChange={(e) => setMapStyle(e.target.value as MapStyle)}>
+            <select value={selectedStyle} onChange={(e) => setMapStyle(e.target.value as MapStyle)}>
               {Object.entries(BASEMAPS).map(([value, info]) => (
                 <option key={value} value={value}>{info.label}</option>
               ))}
@@ -669,6 +908,20 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
               ))}
             </select>
           </div>
+          <button
+            type="button"
+            className={`btn-outline-secondary map-toggle-btn ${terrainEnabled ? "active" : ""}`}
+            onClick={() => setTerrainEnabled((v) => !v)}
+          >
+            Terrain {terrainEnabled ? "On" : "Off"}
+          </button>
+          <button
+            type="button"
+            className={`btn-outline-secondary map-toggle-btn ${telemetryEnabled ? "active" : ""}`}
+            onClick={() => setTelemetryEnabled((v) => !v)}
+          >
+            Telemetry {telemetryEnabled ? "On" : "Off"}
+          </button>
         </div>
       </div>
 
@@ -677,6 +930,50 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
         <button className="btn-outline-secondary map-reset-zoom-btn" onClick={resetZoomToRoute}>
           Reset zoom
         </button>
+        {telemetryEnabled && telemetryData && (
+          <div className="telemetry-overlay" aria-live="polite">
+            <div className="telemetry-overlay-title">Timeline Telemetry</div>
+            <div className="telemetry-overlay-grid">
+              <div><span>Point</span><strong>{telemetryData.point}</strong></div>
+              <div><span>Time</span><strong>{telemetryData.time}</strong></div>
+              <div><span>Speed</span><strong>{telemetryData.speed}</strong></div>
+              <div><span>Heart</span><strong>{telemetryData.heartRate}</strong></div>
+              <div><span>Alt</span><strong>{telemetryData.altitude}</strong></div>
+              <div><span>Cadence</span><strong>{telemetryData.cadence}</strong></div>
+              <div><span>Power</span><strong>{telemetryData.power}</strong></div>
+              <div><span>Temp</span><strong>{telemetryData.temp}</strong></div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="map-playback-bar">
+        <button className="btn-outline-secondary map-playback-btn" onClick={togglePlayback} disabled={coordinates.length < 2}>
+          {isPlaying ? "Pause" : "Play"}
+        </button>
+        <input
+          className="map-playback-range"
+          type="range"
+          min={0}
+          max={Math.max(0, coordinates.length - 1)}
+          step={1}
+          value={Math.min(timelineIndex, Math.max(0, coordinates.length - 1))}
+          disabled={coordinates.length < 2}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setIsPlaying(false);
+            setTimelineIndex(next);
+          }}
+        />
+        <button
+          className="btn-outline-secondary map-playback-speed"
+          type="button"
+          onClick={() => setPlaybackSpeedIndex((i) => (i + 1) % PLAYBACK_SPEEDS.length)}
+          disabled={coordinates.length < 2}
+        >
+          Speed {playbackSpeed}x
+        </button>
+        <span className="map-playback-time">{formatElapsed(currentElapsedSeconds)} / {formatElapsed(totalElapsedSeconds)}</span>
       </div>
 
       {pathColorMode !== "solid" && coordinates.length > 0 && (
