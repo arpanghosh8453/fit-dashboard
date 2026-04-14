@@ -71,10 +71,32 @@
 Download desktop binaries from the [Releases page](https://github.com/arpanghosh8453/fit-dashboard/releases) and install for your platform:
 
 - Linux: `.AppImage` / `.deb` (depending on release artifacts)
-- macOS: `.dmg`
+- macOS: `.dmg` (requires an additional De-Quarantine step, read below)
 - Windows: `.msi` and `exe` installers
 
 After installation, launch FIT Dashboard and complete onboarding on first run.
+
+#### macOS: "App is damaged" Fix
+
+If you downloaded the macOS build and see "FIT Dashboard is damaged and can't be opened", macOS Gatekeeper is blocking an unsigned app (this is a security warning, not a corrupted file). Use one of the methods below to open the app:
+
+##### Method 1: Right-click to Open
+
+1. Locate the app in your Applications folder (or wherever you placed it).
+2. Right-click (or Control+click) on `FIT Dashboard.app`.
+3. Select **Open** from the context menu and confirm **Open** in the dialog.
+
+##### Method 2: Remove the quarantine attribute (Terminal)
+
+Open Terminal and run the following. Type `xattr -cr `, then drag the `.app` bundle onto the Terminal window (it will paste the full path), then press Enter:
+
+```bash
+xattr -cr <drag-and-drop-FIT-Dashboard.app-here>
+```
+
+After running this, try opening the app again.
+
+> **Note:** Apple charges for developer signing; unsigned releases may require these steps. This warning means Gatekeeper prevented launch, not that the file is corrupted.
 
 ### Development
 
