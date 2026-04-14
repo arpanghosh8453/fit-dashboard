@@ -189,10 +189,35 @@ async fn import_fit(
                 Json(serde_json::json!({ "error": "failed reading upload bytes" })),
             )
         })?;
+        let hash = sha256_hex(&bytes);
+
+        match state.db.is_hash_blacklisted(&hash) {
+            Ok(true) => {
+                tracing::info!(file_name = %file_name, file_hash = %hash, "upload skipped: blacklisted");
+                return Ok(Json(serde_json::json!({ "status": "skipped" })));
+            }
+            Ok(false) => {}
+            Err(_) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "database query failed" })),
+                ));
+            }
+        }
+
         let parsed = match parse_activity_bytes(&file_name, &bytes) {
             Ok(v) => v,
             Err(e) => {
                 if is_non_activity_fit_error(&e) {
+                    state
+                        .db
+                        .add_blacklisted_hash(&hash)
+                        .map_err(|_| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(serde_json::json!({ "error": "failed updating blacklist" })),
+                            )
+                        })?;
                     tracing::info!(file_name = %file_name, "upload skipped: non-activity FIT file");
                     return Ok(Json(serde_json::json!({ "status": "skipped" })));
                 }
@@ -461,6 +486,10 @@ async fn sync_fit_files(
             Ok(v) => v,
             Err(e) => {
                 if is_non_activity_fit_error(&e) {
+                    if state.db.add_blacklisted_hash(&hash).is_err() {
+                        summary.failed += 1;
+                        continue;
+                    }
                     summary.skipped += 1;
                 } else {
                     summary.failed += 1;
@@ -577,6 +606,10 @@ async fn process_sync_file(
         Ok(v) => v,
         Err(e) => {
             if is_non_activity_fit_error(&e) {
+                state
+                    .db
+                    .add_blacklisted_hash(&hash)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                 tracing::info!(file = %file_name, "sync file skipped: non-activity FIT file");
                 return Ok(Json(serde_json::json!({ "status": "skipped", "file": file_name })));
             }

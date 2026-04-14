@@ -202,10 +202,25 @@ fn import_activity_inner(
     bytes: &[u8],
 ) -> Result<serde_json::Value, String> {
     tracing::debug!(file_name = %file_name, bytes = bytes.len(), "processing import payload");
+    let hash = sha256_hex(bytes);
+
+    if state
+        .db
+        .is_hash_blacklisted(&hash)
+        .map_err(|e| e.to_string())?
+    {
+        tracing::info!(file_name = %file_name, file_hash = %hash, "import skipped: blacklisted");
+        return Ok(serde_json::json!({ "status": "skipped" }));
+    }
+
     let parsed = match parse_activity_bytes(file_name, bytes) {
         Ok(v) => v,
         Err(e) => {
             if is_non_activity_fit_error(&e) {
+                state
+                    .db
+                    .add_blacklisted_hash(&hash)
+                    .map_err(|db_err| db_err.to_string())?;
                 tracing::info!(file_name = %file_name, "import skipped: non-activity FIT file");
                 return Ok(serde_json::json!({ "status": "skipped" }));
             }
@@ -416,6 +431,25 @@ fn sync_fit_files(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<S
             Ok(v) => v,
             Err(e) => {
                 if is_non_activity_fit_error(&e) {
+                    if state.db.add_blacklisted_hash(&hash).is_err() {
+                        summary.failed += 1;
+                        emit_sync_progress(
+                            &app,
+                            SyncProgressEvent {
+                                current_file: Some(file_name),
+                                processed: idx + 1,
+                                total,
+                                scanned: summary.scanned,
+                                imported: summary.imported,
+                                duplicates: summary.duplicates,
+                                blacklisted: summary.blacklisted,
+                                skipped: summary.skipped,
+                                failed: summary.failed,
+                                done: false,
+                            },
+                        );
+                        continue;
+                    }
                     summary.skipped += 1;
                 } else {
                     summary.failed += 1;
@@ -590,6 +624,10 @@ fn process_sync_file(state: State<'_, AppState>, path: String) -> Result<serde_j
         Ok(v) => v,
         Err(e) => {
             if is_non_activity_fit_error(&e) {
+                state
+                    .db
+                    .add_blacklisted_hash(&hash)
+                    .map_err(|err| err.to_string())?;
                 tracing::info!(file = %file_name, "sync file skipped: non-activity FIT file");
                 return Ok(serde_json::json!({ "status": "skipped", "file": file_name }));
             }

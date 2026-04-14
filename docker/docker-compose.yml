@@ -13,6 +13,7 @@ services:
       - FIT_DASHBOARD_DOCKER=1
       - FIT_DASHBOARD_DATA_DIR=/data
       - FIT_DASHBOARD_DB=/data/fit-dashboard.duckdb
+      - FIT_DASHBOARD_SESSION_TTL=${FIT_DASHBOARD_SESSION_TTL:-72h}
       - RUST_LOG=${RUST_LOG:-info,fit_dashboard_core=debug,hyper=warn,h2=warn}
 
 volumes:
