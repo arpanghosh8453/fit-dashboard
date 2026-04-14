@@ -1087,7 +1087,50 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
   flex-shrink: 0;
+}
+
+.compare-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0 0 0 12px;
+  border-radius: 4px;
+  border: 1.5px solid color-mix(in srgb, var(--text) 38%, transparent);
+  background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+.compare-checkbox:hover {
+  border-color: color-mix(in srgb, var(--accent) 65%, white 35%);
+}
+.compare-checkbox:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.compare-checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.compare-checkbox:checked::before {
+  content: "";
+  width: 5px;
+  height: 9px;
+  border-right: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.compare-checkbox:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+:root[data-theme="dark"] .compare-checkbox {
+  border-color: rgba(228, 228, 231, 0.72);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .sidebar-footer button {

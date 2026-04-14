@@ -1,5 +1,6 @@
 import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
+import { enableChartWheelPageScroll } from "../lib/chartScroll";
 
 type Props = {
   records: RecordPoint[];
@@ -225,8 +226,8 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
-      <ReactECharts option={hrOption} onEvents={onEvents} notMerge style={{ height: 220, width: "100%" }} />
-      <ReactECharts option={paceOption} onEvents={onEvents} notMerge style={{ height: 220, width: "100%" }} />
+      <ReactECharts option={hrOption} onEvents={onEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 220, width: "100%" }} />
+      <ReactECharts option={paceOption} onEvents={onEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 220, width: "100%" }} />
     </div>
   );
 }

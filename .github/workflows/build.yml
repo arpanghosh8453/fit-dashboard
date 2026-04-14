@@ -156,7 +156,7 @@ jobs:
           MATCHED=$(gh release view "$TAG" \
             --repo "${{ github.repository }}" \
             --json assets \
-            -q ".assets[] | select(.name | test(\"^fit-dashboard_.*_${PLATFORM}_(${ARCH_REGEX})(\\\\.|$)\")) | \"\\(.id)\\t\\(.name)\"" || true)
+            -q ".assets[] | select(.name | test(\"^fit-dashboard_.*_${PLATFORM}_(${ARCH_REGEX})(\\\\.|$)\")) | \"\\(.databaseId)\\t\\(.name)\"" || true)
 
           if [ -z "$MATCHED" ]; then
             echo "No stale assets found for ${PLATFORM}/${TARGET}"
@@ -169,13 +169,14 @@ jobs:
             echo "- id=$id name=$name"
           done <<< "$MATCHED"
 
-          IDS=$(gh release view "$TAG" \
-            --repo "${{ github.repository }}" \
-            --json assets \
-            -q ".assets[] | select(.name | test(\"^fit-dashboard_.*_${PLATFORM}_(${ARCH_REGEX})(\\\\.|$)\")) | .id" || true)
+          IDS=$(printf '%s\n' "$MATCHED" | awk -F $'\t' '{print $1}')
 
           while IFS= read -r id; do
             [ -z "$id" ] && continue
+            if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+              echo "Skipping non-numeric asset id=$id"
+              continue
+            fi
             gh api \
               --method DELETE \
               "repos/${{ github.repository }}/releases/assets/$id"

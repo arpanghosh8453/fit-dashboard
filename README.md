@@ -28,6 +28,20 @@
 - [Declaration](#declaration)
 - [License](#license)
 
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/overview_page.png" alt="Overview Page" width="90%" />
+</p>
+
+<p align="center">
+  <img src="screenshots/individual_page.png" alt="Individual Page" width="90%" />
+</p>
+
+<p align="center">
+  <img src="screenshots/compare_page.png" alt="Compare Page" width="90%" />
+</p>
+
 ## Features
 
 - **FIT File Parsing**: Native Rust parser using the `fitparser` crate. Supports all standard Garmin FIT activity files with automatic field extraction.

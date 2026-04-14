@@ -326,6 +326,14 @@ export function Dashboard({ onLogout }: Props) {
     });
   }, [activities, filterSport, minDurationMinutes, maxDurationMinutes, dateFrom, dateTo, searchQuery]);
 
+  useEffect(() => {
+    const allowed = new Set(filtered.map((a) => a.id));
+    setCompareIds((prev) => {
+      const next = prev.filter((id) => allowed.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [filtered]);
+
   const sortedForList = useMemo(() => {
     const list = [...filtered];
     list.sort((a, b) => {
@@ -1250,6 +1258,7 @@ export function Dashboard({ onLogout }: Props) {
                       <div className="activity-item-wrapper" style={{ display: "flex", alignItems: "center", position: "relative", minWidth: 0 }}>
                         {tab === "compare" && (
                           <input 
+                            className="compare-checkbox"
                             type="checkbox" 
                             checked={compareIds.includes(a.id)}
                             onChange={(e) => {
@@ -1260,7 +1269,6 @@ export function Dashboard({ onLogout }: Props) {
                                }
                             }}
                             disabled={!compareIds.includes(a.id) && compareIds.length >= 4}
-                            style={{ margin: "0 0 0 12px", cursor: "pointer", width: "18px", height: "18px", accentColor: "var(--accent)" }}
                           />
                         )}
                         <div

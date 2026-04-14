@@ -2,6 +2,7 @@ import ReactECharts from "echarts-for-react";
 import type { Activity, RecordPoint } from "../types";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { enableChartWheelPageScroll } from "../lib/chartScroll";
 
 type Props = {
   compareIds: number[];
@@ -21,6 +22,21 @@ const formatRelTime = (ms: number) => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
+const formatLegendDateTime = (rawUtc: string) => {
+  const trimmed = rawUtc.trim();
+  const normalized = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+  const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(normalized);
+  const date = new Date(hasZone ? normalized : `${normalized}Z`);
+  if (Number.isNaN(date.getTime())) return rawUtc;
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 export function CompareCharts({ compareIds, activities, theme }: Props) {
   const [loading, setLoading] = useState(false);
   const [dataSets, setDataSets] = useState<{ name: string; records: RecordPoint[] }[]>([]);
@@ -38,7 +54,9 @@ export function CompareCharts({ compareIds, activities, theme }: Props) {
         const results = await Promise.all(
           compareIds.map(async (id) => {
             const act = activities.find(a => a.id === id);
-            const name = act?.activity_name || act?.file_name || `Activity ${id}`;
+            const baseName = act?.activity_name || act?.file_name || `Activity ${id}`;
+            const dateLabel = act?.start_ts_utc ? formatLegendDateTime(act.start_ts_utc) : `#${id}`;
+            const name = `${baseName} — ${dateLabel}`;
             const records = await api.getRecords(id, 45_000).catch(() => []);
             return { name, records };
           })
@@ -164,10 +182,10 @@ export function CompareCharts({ compareIds, activities, theme }: Props) {
           Reset Zoom
         </button>
       </div>
-      <div className="panel"><ReactECharts option={createOption("Heart Rate", "bpm", "heart_rate")} onEvents={zoomEvents} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Speed", "m/s", "speed_m_s")} onEvents={zoomEvents} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Power", "W", "power")} onEvents={zoomEvents} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Altitude", "m", "altitude_m")} onEvents={zoomEvents} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Heart Rate", "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Speed", "m/s", "speed_m_s")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Power", "W", "power")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Altitude", "m", "altitude_m")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
     </div>
   );
 }

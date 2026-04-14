@@ -1,5 +1,6 @@
 import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
+import { enableChartWheelPageScroll } from "../lib/chartScroll";
 
 type Props = {
   records: RecordPoint[];
@@ -422,32 +423,32 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
     <section className="insight-grid">
       <article className="panel">
         <h3>Speed Trend</h3>
-        <ReactECharts option={timelineOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={timelineOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
           <h3>Heart Rate Zone Time</h3>
-          <ReactECharts option={zoneOption} notMerge style={{ height: 280, width: "100%" }} />
+          <ReactECharts option={zoneOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       )}
       <article className="panel">
         <h3>{hasPowerData ? "Cadence & Power" : "Cadence"}</h3>
-        <ReactECharts option={cadenceOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
+        <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       <div className="insight-pair-row">
         <article className="panel">
           <h3>Effort Heatmap</h3>
-          <ReactECharts option={heatOption} notMerge style={{ height: 280, width: "100%" }} />
+          <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
         <article className="panel">
           <h3>Elevation</h3>
-          <ReactECharts option={elevationOption} onEvents={zoomEvents} notMerge style={{ height: 280, width: "100%" }} />
+          <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       </div>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
           <h3>Power vs Heart Rate</h3>
-          <ReactECharts option={scatterOption} notMerge style={{ height: 280, width: "100%" }} />
+          <ReactECharts option={scatterOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       )}
     </section>
