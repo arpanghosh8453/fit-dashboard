@@ -1,6 +1,7 @@
 import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
+import { HEART_RATE_ZONES } from "../lib/hrZones";
 
 type Props = {
   records: RecordPoint[];
@@ -84,14 +85,15 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
       show: false,
       seriesIndex: 0,
       dimension: 1,
-      pieces: [
-        { lte: 75, color: "#3b82f6" },
-        { gt: 75, lte: 95, color: "#22c55e" },
-        { gt: 95, lte: 120, color: "#eab308" },
-        { gt: 120, lte: 150, color: "#f97316" },
-        { gt: 150, lte: 180, color: "#ef4444" },
-        { gt: 180, color: "#dc2626" },
-      ],
+      pieces: HEART_RATE_ZONES.map((zone) => {
+        if (zone.maxInclusive === null) {
+          return { gt: zone.minExclusive, color: zone.color };
+        }
+        if (!Number.isFinite(zone.minExclusive)) {
+          return { lte: zone.maxInclusive, color: zone.color };
+        }
+        return { gt: zone.minExclusive, lte: zone.maxInclusive, color: zone.color };
+      }),
     },
     grid: { left: 48, right: 16, top: 36, bottom: 38 },
     xAxis: {

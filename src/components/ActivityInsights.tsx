@@ -1,6 +1,7 @@
 import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
+import { HEART_RATE_ZONES, resolveHeartRateZoneIndex } from "../lib/hrZones";
 
 type Props = {
   records: RecordPoint[];
@@ -91,20 +92,14 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
   const hrValues = records
     .map((r) => r.heart_rate)
     .filter((n): n is number => typeof n === "number" && n > 0);
-  const maxHrObserved = hrValues.length ? Math.max(...hrValues) : 0;
-
-  const zoneMinutes = [0, 0, 0, 0, 0];
-  if (maxHrObserved > 0) {
+  const zoneMinutes = HEART_RATE_ZONES.map(() => 0);
+  if (hrValues.length > 0) {
     for (let i = 0; i < records.length - 1; i += 1) {
       const hr = records[i].heart_rate;
       if (typeof hr !== "number" || hr <= 0) continue;
       const dtMin = Math.max(0, (records[i + 1].timestamp_ms - records[i].timestamp_ms) / 60000);
-      const ratio = hr / maxHrObserved;
-      if (ratio < 0.6) zoneMinutes[0] += dtMin;
-      else if (ratio < 0.7) zoneMinutes[1] += dtMin;
-      else if (ratio < 0.8) zoneMinutes[2] += dtMin;
-      else if (ratio < 0.9) zoneMinutes[3] += dtMin;
-      else zoneMinutes[4] += dtMin;
+      const zoneIndex = resolveHeartRateZoneIndex(hr);
+      zoneMinutes[zoneIndex] += dtMin;
     }
   }
 
@@ -223,15 +218,18 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
       {
         type: "pie",
         radius: ["38%", "72%"],
-        itemStyle: { borderRadius: 8, borderColor: "transparent", borderWidth: 2 },
+        padAngle: 2,
+        itemStyle: {
+          borderRadius: 8,
+          borderColor: isDark ? "#0b1220" : "#ffffff",
+          borderWidth: 3,
+        },
         label: { color: axisColor, fontSize: 12, formatter: (p: any) => `${p.name}\n${Number(p.value).toFixed(1)} min` },
-        data: [
-          { name: "Z1 <60%", value: zoneMinutes[0], itemStyle: { color: "#38bdf8" } },
-          { name: "Z2 60-70%", value: zoneMinutes[1], itemStyle: { color: "#22c55e" } },
-          { name: "Z3 70-80%", value: zoneMinutes[2], itemStyle: { color: "#f59e0b" } },
-          { name: "Z4 80-90%", value: zoneMinutes[3], itemStyle: { color: "#f97316" } },
-          { name: "Z5 >90%", value: zoneMinutes[4], itemStyle: { color: "#ef4444" } },
-        ],
+        data: HEART_RATE_ZONES.map((zone, idx) => ({
+          name: zone.name,
+          value: zoneMinutes[idx],
+          itemStyle: { color: zone.color },
+        })),
       },
     ],
   };
@@ -335,77 +333,127 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
 
   const totalRelMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
   const heatBins = Math.max(1, Math.ceil(totalRelMs / 60000));
-  const heatRows = hasPowerData ? ["HR", "Speed", "Cadence", "Power", "Temp"] : ["HR", "Speed", "Cadence", "Temp"];
-  const heatData: Array<[number, number, number]> = [];
+  const heatMetrics = [
+    {
+      label: "HR",
+      unit: "bpm",
+      getter: (d: (typeof timeline)[number]) => d.heartRate,
+      colors: isDark ? ["#2a0b12", "#dc2626", "#fb7185"] : ["#fee2e2", "#f87171", "#dc2626"],
+    },
+    {
+      label: "Speed",
+      unit: "km/h",
+      getter: (d: (typeof timeline)[number]) => d.speedKmh,
+      colors: isDark ? ["#0e2a1e", "#16a34a", "#4ade80"] : ["#dcfce7", "#4ade80", "#15803d"],
+    },
+    {
+      label: "Cadence",
+      unit: "rpm",
+      getter: (d: (typeof timeline)[number]) => d.cadence,
+      colors: isDark ? ["#2f1a05", "#f59e0b", "#facc15"] : ["#fef3c7", "#fbbf24", "#d97706"],
+    },
+    {
+      label: "Temp",
+      unit: "degC",
+      getter: (d: (typeof timeline)[number]) => d.temperatureC,
+      colors: isDark ? ["#0b1a3a", "#1d4ed8", "#38bdf8"] : ["#dbeafe", "#60a5fa", "#1d4ed8"],
+    },
+  ] as const;
+
+  const heatRowBounds = heatMetrics.map(() => ({ min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }));
+  const rawHeatCells: Array<Array<{ x: number; raw: number | null }>> = heatMetrics.map(() => []);
 
   for (let x = 0; x < heatBins; x += 1) {
     const startMs = x * 60000;
     const endMs = startMs + 60000;
     const slice = timeline.filter((d) => d.relMs >= startMs && d.relMs < endMs);
-    const metrics = hasPowerData
-      ? [
-          safeAvg(slice.map((r) => r.heartRate)),
-          safeAvg(slice.map((r) => r.speedKmh)),
-          safeAvg(slice.map((r) => r.cadence)),
-          safeAvg(slice.map((r) => r.power)),
-          safeAvg(slice.map((r) => r.temperatureC)),
-        ]
-      : [
-          safeAvg(slice.map((r) => r.heartRate)),
-          safeAvg(slice.map((r) => r.speedKmh)),
-          safeAvg(slice.map((r) => r.cadence)),
-          safeAvg(slice.map((r) => r.temperatureC)),
-        ];
-
-    for (let y = 0; y < metrics.length; y += 1) {
-      heatData.push([x, y, Number((metrics[y] ?? 0).toFixed(2))]);
+    for (let row = 0; row < heatMetrics.length; row += 1) {
+      const metricValue = safeAvg(slice.map((r) => heatMetrics[row].getter(r)));
+      const raw = typeof metricValue === "number" && Number.isFinite(metricValue) ? Number(metricValue.toFixed(2)) : null;
+      if (raw !== null) {
+        heatRowBounds[row].min = Math.min(heatRowBounds[row].min, raw);
+        heatRowBounds[row].max = Math.max(heatRowBounds[row].max, raw);
+      }
+      rawHeatCells[row].push({ x, raw });
     }
   }
+
+  const heatSeriesData: Array<Array<{ value: [number, number, number]; raw: number | null; label: string; unit: string }>> =
+    rawHeatCells.map((rowCells, row) => {
+      const bounds = heatRowBounds[row];
+      const hasBounds = Number.isFinite(bounds.min) && Number.isFinite(bounds.max);
+      return rowCells.map(({ x, raw }) => {
+        let normalized = 0;
+        if (raw !== null && hasBounds) {
+          normalized = bounds.max > bounds.min ? (raw - bounds.min) / (bounds.max - bounds.min) : 0.5;
+        }
+        return {
+          value: [x, 0, Number(normalized.toFixed(4))],
+          raw,
+          label: heatMetrics[row].label,
+          unit: heatMetrics[row].unit,
+        };
+      });
+    });
+
+  const rowTop = [16, 64, 112, 160];
+  const rowHeight = 34;
 
   const heatOption = {
     tooltip: {
       position: "top",
       ...tooltipStyle,
       formatter: (p: any) => {
-        const minuteIdx = Number(p.value[0]);
-        const rowIdx = Number(p.value[1]);
-        const value = Number(p.value[2]);
+        const minuteIdx = Number(p?.value?.[0] ?? 0);
+        const value = (p?.data?.raw ?? null) as number | null;
+        const label = String(p?.data?.label ?? "Metric");
+        const unit = String(p?.data?.unit ?? "");
         const startMs = minuteIdx * 60000;
         const endMs = (minuteIdx + 1) * 60000;
-        return `<div><strong>${heatRows[rowIdx]}</strong></div><div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${value.toFixed(2)}</strong></div>`;
+        const valueText = value === null ? "--" : `${value.toFixed(2)} ${unit}`;
+        return `<div><strong>${label}</strong></div><div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${valueText}</strong></div>`;
       },
     },
-    grid: { left: 58, right: 14, top: 16, bottom: 44 },
-    xAxis: {
+    grid: rowTop.map((top) => ({ left: 58, right: 14, top, height: rowHeight })),
+    xAxis: rowTop.map((_, idx) => ({
       type: "category",
+      gridIndex: idx,
       data: Array.from({ length: heatBins }, (_, i) => formatRelTime(i * 60000)),
       axisLabel: {
+        show: idx === rowTop.length - 1,
         color: axisColor,
         interval: Math.max(0, Math.floor(heatBins / 14)),
         fontSize: 11,
       },
-    },
-    yAxis: {
+      axisLine: { show: idx === rowTop.length - 1, lineStyle: { color: gridLine } },
+      axisTick: { show: idx === rowTop.length - 1 },
+      splitLine: { show: false },
+    })),
+    yAxis: heatMetrics.map((metric, idx) => ({
       type: "category",
-      data: heatRows,
+      gridIndex: idx,
+      data: [metric.label],
       axisLabel: { color: axisColor, fontSize: 11 },
-    },
-    visualMap: {
+      axisTick: { show: false },
+      axisLine: { show: false },
+      splitLine: { show: false },
+    })),
+    visualMap: heatMetrics.map((metric, idx) => ({
+      show: false,
       min: 0,
-      max: Math.max(...heatData.map((d) => d[2]), 1),
-      orient: "horizontal",
-      left: "center",
-      bottom: 0,
-      textStyle: { color: axisColor, fontSize: 11 },
-      inRange: { color: isDark ? ["#0f172a", "#1d4ed8", "#22d3ee", "#facc15"] : ["#f0f4f8", "#3b82f6", "#06b6d4", "#f59e0b"] },
-    },
-    series: [
-      {
-        type: "heatmap",
-        data: heatData,
-        emphasis: { itemStyle: { borderColor: isDark ? "#fff" : "#0f172a", borderWidth: 1 } },
-      },
-    ],
+      max: 1,
+      dimension: 2,
+      seriesIndex: idx,
+      inRange: { color: metric.colors },
+    })),
+    series: heatMetrics.map((_, idx) => ({
+      type: "heatmap",
+      xAxisIndex: idx,
+      yAxisIndex: idx,
+      encode: { x: 0, y: 1, value: 2 },
+      data: heatSeriesData[idx],
+      emphasis: { itemStyle: { borderColor: isDark ? "#fff" : "#0f172a", borderWidth: 1 } },
+    })),
   };
 
   const zoomEvents = {
@@ -435,16 +483,14 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         <h3>{hasPowerData ? "Cadence & Power" : "Cadence"}</h3>
         <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
-      <div className="insight-pair-row">
-        <article className="panel">
-          <h3>Effort Heatmap</h3>
-          <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
-        </article>
-        <article className="panel">
-          <h3>Elevation</h3>
-          <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
-        </article>
-      </div>
+      <article className="panel">
+        <h3>Effort Heatmap</h3>
+        <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+      </article>
+      <article className="panel">
+        <h3>Elevation</h3>
+        <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+      </article>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
           <h3>Power vs Heart Rate</h3>
