@@ -124,6 +124,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.resolve-tag.outputs.tag }}
+          RELEASE_ID: ${{ needs.resolve-tag.outputs.release_id }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
@@ -151,12 +152,10 @@ jobs:
               ;;
           esac
 
-          echo "Scanning release $TAG for stale assets (platform=$PLATFORM, arch_regex=$ARCH_REGEX)"
+          echo "Scanning release $TAG (id=$RELEASE_ID) for stale assets (platform=$PLATFORM, arch_regex=$ARCH_REGEX)"
 
-          MATCHED=$(gh release view "$TAG" \
-            --repo "${{ github.repository }}" \
-            --json assets \
-            -q ".assets[] | select(.name | test(\"^fit-dashboard_.*_${PLATFORM}_(${ARCH_REGEX})(\\\\.|$)\")) | \"\\(.databaseId)\\t\\(.name)\"" || true)
+          MATCHED=$(gh api "repos/${{ github.repository }}/releases/${RELEASE_ID}/assets?per_page=100" \
+            --jq ".[] | select(.name | test(\"^fit-dashboard_.*_${PLATFORM}_(${ARCH_REGEX})(\\\\.|$)\"; \"i\")) | \"\\(.id)\\t\\(.name)\"" || true)
 
           if [ -z "$MATCHED" ]; then
             echo "No stale assets found for ${PLATFORM}/${TARGET}"
@@ -183,8 +182,8 @@ jobs:
             echo "Deleted stale asset id=$id"
           done <<< "$IDS"
 
-      - name: Build and upload release assets (non-Windows)
-        if: runner.os != 'Windows'
+      - name: Build and upload release assets (Linux)
+        if: runner.os == 'Linux'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -194,9 +193,24 @@ jobs:
           includeRelease: true
           releaseDraft: false
           prerelease: false
-          uploadPlainBinary: true
+          uploadPlainBinary: false
           assetNamePattern: 'fit-dashboard_[version]_[platform]_[arch].[ext]'
-          args: --target ${{ matrix.target }} --verbose
+          args: --target ${{ matrix.target }} --bundles deb,rpm,appimage --verbose
+
+      - name: Build and upload release assets (macOS)
+        if: runner.os == 'macOS'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tagName: ${{ needs.resolve-tag.outputs.tag }}
+          includeRelease: true
+          releaseDraft: false
+          prerelease: false
+          uploadPlainBinary: false
+          assetNamePattern: 'fit-dashboard_[version]_[platform]_[arch].[ext]'
+          args: --target ${{ matrix.target }} --bundles dmg --verbose
 
       - name: Build and upload release assets (Windows nsis + msi)
         if: runner.os == 'Windows'
@@ -209,7 +223,7 @@ jobs:
           includeRelease: true
           releaseDraft: false
           prerelease: false
-          uploadPlainBinary: true
+          uploadPlainBinary: false
           assetNamePattern: 'fit-dashboard_[version]_[platform]_[arch].[ext]'
           args: --target ${{ matrix.target }} --bundles nsis,msi --verbose
 
