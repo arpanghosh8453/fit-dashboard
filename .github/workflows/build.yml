@@ -119,6 +119,69 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Delete stale release assets for current target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+
+          case "$TARGET" in
+            aarch64-apple-darwin)
+              PLATFORM="darwin"
+              ARCH_REGEX="aarch64|arm64"
+              ;;
+            x86_64-apple-darwin)
+              PLATFORM="darwin"
+              ARCH_REGEX="x64|x86_64|amd64"
+              ;;
+            x86_64-unknown-linux-gnu)
+              PLATFORM="linux"
+              ARCH_REGEX="x64|x86_64|amd64"
+              ;;
+            x86_64-pc-windows-msvc)
+              PLATFORM="windows"
+              ARCH_REGEX="x64|x86_64|amd64"
+              ;;
+            *)
+              echo "Unknown target $TARGET; skipping stale asset cleanup"
+              exit 0
+              ;;
+          esac
+
+          echo "Scanning release $TAG for stale assets (platform=$PLATFORM, arch_regex=$ARCH_REGEX)"
+
+          MATCHED=$(gh release view "$TAG" \
+            --repo "${{ github.repository }}" \
+            --json assets \
+            -q ".assets[] | select(.name | test(\"^fit-dashboard_.*_${PLATFORM}_(${ARCH_REGEX})(\\\\.|$)\")) | \"\\(.id)\\t\\(.name)\"" || true)
+
+          if [ -z "$MATCHED" ]; then
+            echo "No stale assets found for ${PLATFORM}/${TARGET}"
+            exit 0
+          fi
+
+          echo "Matched stale release assets:"
+          while IFS=$'\t' read -r id name; do
+            [ -z "$id" ] && continue
+            echo "- id=$id name=$name"
+          done <<< "$MATCHED"
+
+          IDS=$(gh release view "$TAG" \
+            --repo "${{ github.repository }}" \
+            --json assets \
+            -q ".assets[] | select(.name | test(\"^fit-dashboard_.*_${PLATFORM}_(${ARCH_REGEX})(\\\\.|$)\")) | .id" || true)
+
+          while IFS= read -r id; do
+            [ -z "$id" ] && continue
+            gh api \
+              --method DELETE \
+              "repos/${{ github.repository }}/releases/assets/$id"
+            echo "Deleted stale asset id=$id"
+          done <<< "$IDS"
+
       - name: Build and upload release assets (non-Windows)
         if: runner.os != 'Windows'
         uses: tauri-apps/tauri-action@v0
