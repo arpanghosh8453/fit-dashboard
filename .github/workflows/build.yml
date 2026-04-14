@@ -119,6 +119,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Configure static MSVC runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            echo "RUSTFLAGS=-C target-feature=+crt-static"
+            echo "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+          } >> "$GITHUB_ENV"
+
       - name: Delete stale release assets for current target
         shell: bash
         env:

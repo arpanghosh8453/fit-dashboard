@@ -28,6 +28,7 @@ tauri-plugin-dialog = { version = "2", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+static_vcruntime = "2"
 
 # Optional desktop mode
 # tauri and tauri-plugin-shell can be enabled if you want to compile desktop binaries immediately.
