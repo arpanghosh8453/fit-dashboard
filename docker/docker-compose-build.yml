@@ -6,6 +6,7 @@ services:
       args:
         VITE_API_BASE: /api
     container_name: fit-dashboard
+    command: ["sh", "-c", "rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-available/default && exec /usr/local/bin/start-fit-dashboard.sh"]
     restart: unless-stopped
     ports:
       - "8088:80"

@@ -25,6 +25,7 @@ WORKDIR /app
 COPY --from=backend-builder /app/src-tauri/target/release/fit-dashboard-core /usr/local/bin/fit-dashboard
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/sites-enabled/default /etc/nginx/sites-available/default
 
 RUN cat <<'EOF' >/usr/local/bin/start-fit-dashboard.sh
 #!/usr/bin/env bash

@@ -24,7 +24,8 @@ type BlacklistCountSummary = {
   count: number;
 };
 
-const base = (import.meta.env.VITE_API_BASE ?? "http://localhost:8080").replace(/\/$/, "");
+const configuredBase = (import.meta.env.VITE_API_BASE ?? "http://localhost:8080").replace(/\/$/, "");
+const apiBase = configuredBase.endsWith("/api") ? configuredBase : `${configuredBase}/api`;
 
 const SESSION_KEY = "sessionToken";
 const SESSION_TS_KEY = "sessionTokenTs";
@@ -52,7 +53,7 @@ function getStoredSession(): string | null {
 let sessionToken: string | null = getStoredSession();
 
 const webClient = axios.create({
-  baseURL: `${base}/api`
+  baseURL: apiBase
 });
 
 webClient.interceptors.request.use((config) => {
