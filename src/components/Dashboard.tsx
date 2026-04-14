@@ -235,7 +235,7 @@ export function Dashboard({ onLogout }: Props) {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
-  const [isFilterOpen, setIsFilterOpen] = useState(true);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(true);
   const [minDurationMinutes, setMinDurationMinutes] = useState("");
   const [maxDurationMinutes, setMaxDurationMinutes] = useState("");

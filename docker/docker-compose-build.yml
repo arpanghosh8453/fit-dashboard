@@ -1,6 +1,10 @@
 services:
   fit-dashboard:
-    image: ghcr.io/arpanghosh8453/fit-dashboard:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        VITE_API_BASE: /api
     container_name: fit-dashboard
     restart: unless-stopped
     ports:

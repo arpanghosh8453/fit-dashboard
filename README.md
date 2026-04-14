@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="public/favicon.svg" alt="FIT Dashboard" width="80" />
+  <img src="src/assets/app-icon.svg" alt="FIT Dashboard" width="80" />
 </p>
 
 <H1 align="center">FIT Dashboard</H1>
@@ -12,10 +12,9 @@
 
 - [Features](#features)
 - [Getting Started](#getting-started)
-  - [Try the Webapp](#try-the-webapp)
-  - [Run from Source (Development)](#run-from-source-development)
+  - [Prebuilt Binaries](#prebuilt-binaries)
+  - [Development](#development)
   - [Docker Deployment (Self-hosted)](#docker-deployment-self-hosted)
-  - [Tauri Desktop App](#tauri-desktop-app)
 - [Usage](#usage)
 - [Export Formats](#export-formats)
 - [Tech Stack](#tech-stack)
@@ -23,6 +22,9 @@
 - [API Reference](#api-reference)
 - [Configuration](#configuration)
 - [Security](#security)
+- [Acknowledgements](#acknowledgements)
+- [Love This Project?](#love-this-project)
+- [Declaration](#declaration)
 - [License](#license)
 
 ## Features
@@ -45,13 +47,23 @@
 
 ## Getting Started
 
-### Prerequisites
+### Prebuilt Binaries (Windows/MacOS/Linux)
+
+Download desktop binaries from the [Releases page](https://github.com/arpanghosh8453/fit-dashboard/releases) and install for your platform:
+
+- Linux: `.AppImage` / `.deb` (depending on release artifacts)
+- macOS: `.dmg`
+- Windows: `.msi` and `exe` installers
+
+After installation, launch FIT Dashboard and complete onboarding on first run.
+
+### Development
+
+#### Prerequisites
 
 - [Rust](https://rustup.rs/) 1.70+
 - [Node.js](https://nodejs.org/) 18+
 - npm (bundled with Node.js)
-
-### Run from Source (Development)
 
 ```bash
 # Clone the repository
@@ -70,15 +82,30 @@ cargo run --features web
 cd fit-dashboard
 npm run dev
 # Frontend starts at http://localhost:5173
+
+# Tauri desktop dev mode
+npm run tauri:dev
+
+# Tauri production build
+npm run tauri:build
 ```
 
 Open http://localhost:5173 in your browser. On first launch, the onboarding screen appears to set up your username and password.
 
 ### Docker Deployment (Self-hosted)
 
+Use the prebuilt GHCR image:
+
 ```bash
 cd docker
-docker compose up --build -d
+docker compose up -d
+```
+
+Build locally from source instead:
+
+```bash
+cd docker
+docker compose -f docker-compose-build.yml up --build -d
 ```
 
 Open http://localhost:8088 in your browser. The Nginx reverse proxy serves the frontend and proxies API requests to the Rust backend.
@@ -86,18 +113,6 @@ Open http://localhost:8088 in your browser. The Nginx reverse proxy serves the f
 #### Data Persistence
 
 All data (DuckDB database, config) is stored in a Docker named volume mapped to `/data/fit-dashboard` inside the container. Data persists across container restarts and image updates.
-
-### Tauri Desktop App
-
-```bash
-npm install
-
-# Development mode
-npm run tauri:dev
-
-# Production build
-npm run tauri:build
-```
 
 The desktop app runs the Rust backend natively with Tauri IPC — no web server needed.
 
@@ -183,10 +198,10 @@ fit-dashboard/
 │
 ├── docker/                      # DOCKER CONFIG
 │   ├── Dockerfile              # Combined backend + frontend image build
-│   ├── docker-compose.yml      # Full-stack deployment
+│   ├── docker-compose.yml      # Prebuilt GHCR image deployment
+│   ├── docker-compose-build.yml# Local source build deployment
 │   └── nginx.conf              # Reverse proxy config
 │
-├── public/                      # Static assets
 ├── index.html                   # HTML entry point
 ├── vite.config.ts               # Vite configuration
 ├── tsconfig.json                # TypeScript configuration
@@ -225,17 +240,37 @@ All endpoints require the `X-Session` header after authentication (except `/api/
 
 - Passwords are hashed with **Argon2** before storage
 - Session tokens are generated server-side and validated on every request
-- Sessions are stored in-memory — a server restart invalidates all sessions
 - For internet-facing deployments, use a reverse proxy (Nginx, Caddy, Traefik) with TLS termination
 
-## Performance
+## Acknowledgements
 
-Designed for up to ~1M records in DuckDB. Key optimizations:
+- [fitparser](https://crates.io/crates/fitparser) for robust FIT decoding.
+- [DuckDB](https://duckdb.org/) for fast embedded analytics.
+- [MapLibre GL JS](https://maplibre.org/) for rendering activity maps.
+- Tile/map providers used by built-in styles:
+  - [OpenStreetMap](https://www.openstreetmap.org/copyright)
+  - [CARTO](https://carto.com/attributions)
+  - [OpenTopoMap](https://opentopomap.org/about)
+  - [Esri World Imagery](https://www.esri.com/en-us/legal/overview)
+- [ECharts](https://echarts.apache.org/) for charting.
+- [Tauri](https://tauri.app/) and [Axum](https://github.com/tokio-rs/axum) for desktop and web runtime foundations.
 
-- SQL-level downsampling reduces chart payload sizes by 10–100x
-- Lazy loading — records are fetched only when an activity is selected
-- Overview data uses aggressive downsampling (45s intervals) across sampled activities
-- Export uses 1s resolution for full-fidelity output
+## Love This Project?
+
+If FIT Dashboard helps your training workflow, consider supporting ongoing development:
+
+- Give this repository a star.
+- Share it with other athletes, coaches, and data enthusiasts.
+- Get a supporter badge via [Ko-fi](https://ko-fi.com/s/ec2c3036ee).
+
+## Declaration
+
+FIT Dashboard is a personal open-source project maintained in public. I started this project as an offline alternative to my other project [garmin-grafana](https://github.com/arpanghosh8453/garmin-grafana)
+
+- It is not affiliated with Garmin, Strava, Golden Cheetah, or any map/tile provider.
+- All trademarks and product names are the property of their respective owners.
+- Map data and tiles remain subject to each provider's attribution and usage terms.
+- This project is AI assisted. Some feature implementations includes using Claude Opus 4.5 and Codex 5.3. Although design, artitecture, behaviour and implementation decisions are always made by myself. I test out features throughly before each release and try my best to address any reported issue within a reasonable timeline. 
 
 ## License
 

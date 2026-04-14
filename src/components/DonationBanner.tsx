@@ -18,7 +18,7 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
         </span>
         <a
           className="donation-banner-link"
-          href="https://ko-fi.com/arpandesign"
+          href="https://ko-fi.com/s/ec2c3036ee"
           target="_blank"
           rel="noreferrer"
         >

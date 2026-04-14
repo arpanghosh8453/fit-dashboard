@@ -28,6 +28,23 @@ pub fn run(state: AppState) -> anyhow::Result<()> {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
+        .setup(|app| {
+            // Some Linux desktops ignore SVG bundle metadata for live window icons,
+            // so set an explicit PNG icon on startup.
+            match tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                Ok(icon) => {
+                    for window in app.webview_windows().values() {
+                        if let Err(err) = window.set_icon(icon.clone()) {
+                            tracing::warn!(error = %err, label = %window.label(), "failed to set window icon");
+                        }
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "failed to decode bundled PNG icon");
+                }
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let app_state = window.app_handle().state::<AppState>();
