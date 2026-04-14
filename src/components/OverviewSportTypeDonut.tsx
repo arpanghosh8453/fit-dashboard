@@ -51,7 +51,12 @@ export function OverviewSportTypeDonut({ activities, theme }: Props) {
         type: "pie",
         radius: ["48%", "74%"],
         center: ["50%", "45%"],
-        itemStyle: { borderColor: "transparent", borderWidth: 2, borderRadius: 8 },
+        padAngle: 2,
+        itemStyle: {
+          borderColor: isDark ? "#0b1220" : "#ffffff",
+          borderWidth: 3,
+          borderRadius: 8,
+        },
         label: { color: axisColor, fontSize: 11, formatter: "{b}: {c}" },
         labelLine: { length: 10, length2: 8 },
         data,
