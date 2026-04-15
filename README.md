@@ -53,10 +53,6 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/individual_page_2.png" alt="Overview Page" width="90%" />
-</p>
-
-<p align="center">
   <img src="screenshots/compare_page.png" alt="Compare Page" width="90%" />
 </p>
 
