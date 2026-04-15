@@ -1,5 +1,5 @@
 variables:
-  - &dockerfile Dockerfile
+  - &dockerfile docker/Dockerfile
   - &repo codeberg.org/${CI_REPO_OWNER}/${CI_REPO_NAME}
 
 steps:
