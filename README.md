@@ -9,6 +9,10 @@
     <img src="https://img.shields.io/badge/Download-Latest%20Release-1a7f37?style=for-the-badge&logo=github" alt="Download Latest Release" height="48"/>
   </a>
   &nbsp;&nbsp;
+  <a href="https://fitdashboard.app/">
+    <img src="https://img.shields.io/badge/Website-Visit%20Site-0ea5e9?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website" height="48"/>
+  </a>
+  &nbsp;&nbsp;
   <a href="https://discord.gg/xVu4gK75zG">
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord" height="48"/>
   </a>
