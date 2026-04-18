@@ -8,7 +8,17 @@ type StorageInfo = {
   fit_files_dir: string;
 };
 
-export function SettingsPanel() {
+type VersionBadgeStatus = {
+  state: "hidden" | "latest" | "update";
+  latestVersion: string | null;
+};
+
+type Props = {
+  appVersion: string;
+  versionBadgeStatus: VersionBadgeStatus;
+};
+
+export function SettingsPanel({ appVersion, versionBadgeStatus }: Props) {
   const {
     showSettings,
     theme,
@@ -29,7 +39,6 @@ export function SettingsPanel() {
   const [verifying, setVerifying] = useState(false);
   const [codeMsg, setCodeMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
-  const [appVersion, setAppVersion] = useState("loading...");
   const [clearingBlacklist, setClearingBlacklist] = useState(false);
   const [blacklistMsg, setBlacklistMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [blacklistCount, setBlacklistCount] = useState<number | null>(null);
@@ -37,22 +46,6 @@ export function SettingsPanel() {
   useEffect(() => {
     let cancelled = false;
     if (!showSettings) return;
-
-    void (async () => {
-      const fallbackVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "unknown";
-      try {
-        if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-          const { getVersion } = await import("@tauri-apps/api/app");
-          const version = await getVersion();
-          if (!cancelled) setAppVersion(version);
-          return;
-        }
-      } catch {
-        // If Tauri APIs are unavailable (e.g. web mode), keep fallback version.
-      }
-
-      if (!cancelled) setAppVersion(fallbackVersion);
-    })();
 
     void Promise.all([api.getStorageInfo(), api.getBlacklistedHashCount()])
       .then(([info, count]) => {
@@ -199,7 +192,25 @@ export function SettingsPanel() {
           <strong>Storage Locations</strong>
           {storageInfo ? (
             <div className="storage-meta">
-              <div><span>App version:</span> <code>{appVersion}</code></div>
+              <div>
+                <span>App version:</span> <code>{appVersion}</code>
+                {versionBadgeStatus.state === "latest" && (
+                  <span className="version-status-badge latest" title="You are on the latest release">
+                    Latest
+                  </span>
+                )}
+                {versionBadgeStatus.state === "update" && versionBadgeStatus.latestVersion && (
+                  <a
+                    className="version-status-badge update"
+                    href="https://fitdashboard.app"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title={`A newer release is available: ${versionBadgeStatus.latestVersion}`}
+                  >
+                    Update to {versionBadgeStatus.latestVersion}
+                  </a>
+                )}
+              </div>
               <div><span>App data:</span> <code>{storageInfo.data_dir}</code></div>
               <div><span>Database:</span> <code>{storageInfo.db_path}</code></div>
               <div><span>FIT files:</span> <code>{storageInfo.fit_files_dir}</code></div>

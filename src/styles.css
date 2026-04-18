@@ -7,6 +7,7 @@
 
 :root {
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --content-panel-min-width: 450px;
 
   /* Light Theme */
   --bg: #f0f4f8;
@@ -398,7 +399,8 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .app-header {
@@ -413,6 +415,7 @@ button:focus-visible {
   top: 0;
   z-index: 100;
   min-height: 49px;
+  min-width: var(--content-panel-min-width);
 }
 
 .header-left {
@@ -532,7 +535,7 @@ button:focus-visible {
 
 .app-body {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: 425px 1fr;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -563,7 +566,7 @@ button:focus-visible {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  min-width: 280px;
+  min-width: 350px;
   overflow: hidden;
 }
 
@@ -1091,6 +1094,60 @@ button:focus-visible {
   flex-shrink: 0;
 }
 
+.sidebar-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.version-status-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.35;
+  border: 1px solid transparent;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.version-status-badge.latest {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(22, 163, 74, 0.35);
+}
+
+.version-status-badge.update {
+  color: #a16207;
+  background: rgba(250, 204, 21, 0.2);
+  border-color: rgba(202, 138, 4, 0.4);
+}
+
+.version-status-badge.update:hover {
+  filter: brightness(0.96);
+  text-decoration: underline;
+}
+
+.storage-meta .version-status-badge {
+  margin-left: 0.35rem;
+}
+
+:root[data-theme="dark"] .version-status-badge.latest {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(134, 239, 172, 0.34);
+}
+
+:root[data-theme="dark"] .version-status-badge.update {
+  color: #fcd34d;
+  background: rgba(234, 179, 8, 0.22);
+  border-color: rgba(252, 211, 77, 0.34);
+}
+
 .compare-checkbox {
   appearance: none;
   -webkit-appearance: none;
@@ -1155,6 +1212,7 @@ button:focus-visible {
 .main-content {
   padding: 0 1rem 1rem;
   overflow-y: auto;
+  overflow-x: auto;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -1230,9 +1288,15 @@ button:focus-visible {
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 1rem;
+  overflow: hidden;
   box-shadow: var(--shadow-sm);
   animation: fadeSlideIn 350ms ease both;
   transition: border-color 200ms ease;
+}
+
+.detail-grid .panel,
+.insight-grid .panel {
+  min-width: var(--content-panel-min-width);
 }
 
 .panel:hover {
@@ -1258,6 +1322,8 @@ button:focus-visible {
   flex-direction: column;
   gap: 0.75rem;
   padding: 1rem 1.25rem;
+  width: 100%;
+  min-width: var(--content-panel-min-width);
   border-radius: 14px;
   background: var(--panel);
   backdrop-filter: blur(12px);
@@ -1283,6 +1349,28 @@ button:focus-visible {
   align-items: center;
   gap: 0.4rem;
   flex-wrap: wrap;
+}
+
+.detail-toggle-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.detail-toggle-badge input {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  margin: 0;
 }
 
 .badge {
@@ -1594,6 +1682,42 @@ button:focus-visible {
   background: var(--bg-surface);
 }
 
+.overview-location-panel {
+  height: 560px;
+  min-height: 560px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-location-panel .map-header,
+.overview-location-panel .map-footer-actions {
+  flex-shrink: 0;
+}
+
+.overview-location-panel .overview-map-canvas {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.overview-weekly-trend-panel {
+  height: 380px;
+  min-height: 380px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-weekly-trend-panel h3 {
+  flex-shrink: 0;
+}
+
+.overview-weekly-trend-chart {
+  flex: 1;
+  min-height: 0;
+}
+
 .map-footer-actions {
   display: flex;
   justify-content: flex-end;
@@ -1868,11 +1992,12 @@ button:focus-visible {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  justify-content: stretch;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.38rem 2.1rem 0.38rem 0.9rem;
+  padding: 0.38rem 0.9rem;
   margin-bottom: 0;
   border-radius: 0;
   border-top: 1px solid rgba(123, 149, 196, 0.26);
@@ -1880,6 +2005,8 @@ button:focus-visible {
   background: linear-gradient(180deg, #eef4ff 0%, #e6eefc 100%);
   color: #1f2b44;
   font-size: 0.94rem;
+  width: 100%;
+  min-width: var(--content-panel-min-width);
   animation: fadeSlideIn 240ms ease both;
 }
 
@@ -1889,6 +2016,7 @@ button:focus-visible {
   justify-content: center;
   flex-wrap: wrap;
   gap: 0.4rem;
+  min-width: 0;
 }
 
 .donation-banner-text {
@@ -1920,10 +2048,9 @@ button:focus-visible {
 }
 
 .donation-banner-dismiss {
-  position: absolute;
-  right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
+  position: static;
+  justify-self: end;
+  align-self: center;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -2540,7 +2667,7 @@ button:focus-visible {
     left: 0;
     top: 49px;
     bottom: 0;
-    width: 280px;
+    width: 350px;
     z-index: 150;
     box-shadow: var(--shadow-lg);
     transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -2581,9 +2708,54 @@ button:focus-visible {
 }
 
 @media (max-width: 900px) {
-  .header-search { display: none; }
-  .header-center { flex: 0; }
+  .app-header {
+    flex-wrap: wrap;
+    row-gap: 0.45rem;
+  }
+  .header-left {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .header-right {
+    order: 2;
+  }
+  .header-center {
+    order: 3;
+    flex: 1 0 100%;
+    width: 100%;
+    justify-content: center;
+  }
+  .view-toggle {
+    display: flex;
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .view-toggle button {
+    flex: 1 1 31%;
+    min-width: 96px;
+  }
 
+  .header-search { display: none; }
+  .header-center { flex: 1 0 100%; }
+
+  .donation-banner {
+    justify-content: center;
+    padding: 0.42rem 0.72rem;
+    min-height: 42px;
+  }
+  .donation-banner-content {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+    gap: 0.32rem;
+  }
+  .donation-banner-text--full {
+    display: none;
+  }
+  .donation-banner-text--compact {
+    display: inline;
+  }
   .detail-grid { grid-template-columns: 1fr; }
   .insight-grid { grid-template-columns: 1fr; }
   .insight-pair-row { grid-template-columns: 1fr; }
@@ -2597,6 +2769,14 @@ button:focus-visible {
   .overview-contribution-main .panel,
   .overview-contribution-side .panel {
     height: auto;
+  }
+  .overview-location-panel {
+    height: 520px;
+    min-height: 520px;
+  }
+  .overview-weekly-trend-panel {
+    height: 380px;
+    min-height: 380px;
   }
   .map-playback-bar {
     grid-template-columns: 1fr;
@@ -2622,32 +2802,35 @@ button:focus-visible {
     min-width: 0;
   }
   .overview-map-canvas { height: 300px; }
+  .overview-location-panel {
+    height: 500px;
+    min-height: 500px;
+  }
+  .overview-weekly-trend-panel {
+    height: 360px;
+    min-height: 360px;
+  }
   .donation-banner {
-    flex-direction: row;
     align-items: center;
     justify-content: center;
-    padding: 0.42rem 2rem 0.42rem 0.7rem;
+    padding: 0.42rem 0.62rem;
   }
   .donation-banner-content {
     width: 100%;
     justify-content: center;
+    text-align: center;
     gap: 0.3rem;
-  }
-  .donation-banner-text--full {
-    display: none;
-  }
-  .donation-banner-text--compact {
-    display: inline;
+    line-height: 1.25;
   }
   .settings-grid { grid-template-columns: 1fr; }
   .supporter-box { flex-direction: column; align-items: flex-start; }
   .detail-title-row { flex-direction: column; align-items: flex-start; }
-  .detail-stats-strip { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .detail-stats-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 400px) {
   .stats-row { grid-template-columns: 1fr; }
-  .detail-stats-strip { grid-template-columns: repeat(2, 1fr); }
+  .detail-stats-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* Datepicker Popover */

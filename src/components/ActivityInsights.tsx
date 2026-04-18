@@ -2,6 +2,7 @@ import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
 import { HEART_RATE_ZONES, resolveHeartRateZoneIndex } from "../lib/hrZones";
+import { applyRollingAverageSeries, getDynamicSmoothingWindow } from "../lib/chartSmoothing";
 
 type Props = {
   records: RecordPoint[];
@@ -9,6 +10,7 @@ type Props = {
   zoomRange?: { start: number; end: number } | null;
   onZoomChange?: (range: { start: number; end: number }) => void;
   lapTimestampsUtc?: string[];
+  smoothGraphs?: boolean;
 };
 
 function safeAvg(values: Array<number | null | undefined>): number | null {
@@ -28,7 +30,15 @@ function formatRelTime(ms: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapTimestampsUtc = [] }: Props) {
+function formatAbsTime(baseTimestampMs: number, relMs: number): string {
+  const absolute = new Date(baseTimestampMs + Math.max(0, relMs));
+  const hh = String(absolute.getHours()).padStart(2, "0");
+  const mm = String(absolute.getMinutes()).padStart(2, "0");
+  const ss = String(absolute.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
+export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapTimestampsUtc = [], smoothGraphs = true }: Props) {
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
@@ -41,6 +51,8 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
     borderColor: tooltipBorder,
     textStyle: { color: tooltipText, fontSize: 12 },
   };
+  const formatTooltipHeader = (relMs: number) =>
+    `<div style="display:flex;align-items:center;gap:6px;"><strong>${formatRelTime(relMs)}</strong><span style="display:inline-flex;align-items:center;border-radius:999px;padding:1px 6px;font-size:11px;background:rgba(148,163,184,0.22);">${formatAbsTime(t0, relMs)}</span></div>`;
 
   if (!records.length) {
     return (
@@ -52,6 +64,8 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
   }
 
   const t0 = records[0]?.timestamp_ms ?? 0;
+  const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
+  const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
   const timeline = records.map((r, i) => {
     const prev = i > 0 ? records[i - 1] : undefined;
     const dt = prev ? (r.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
@@ -74,6 +88,16 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
       timestampMs: r.timestamp_ms,
     };
   });
+
+  const speedLineData = timeline.map((d) => [d.relMs, d.speedKmh]);
+  const elevationLineData = timeline.map((d) => [d.relMs, d.altitudeM]);
+  const cadenceLineData = timeline.map((d) => [d.relMs, d.cadence]);
+  const powerLineData = timeline.map((d) => [d.relMs, d.power]);
+
+  const speedLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(speedLineData, 1, smoothWindow) : speedLineData;
+  const elevationLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(elevationLineData, 1, smoothWindow) : elevationLineData;
+  const cadenceLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(cadenceLineData, 1, smoothWindow) : cadenceLineData;
+  const powerLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(powerLineData, 1, smoothWindow) : powerLineData;
 
   const hasPowerData = records.some((r) => typeof r.power === "number" && r.power > 0);
   const hasHeartRateData = records.some((r) => typeof r.heart_rate === "number" && r.heart_rate > 0);
@@ -109,8 +133,8 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
       ...tooltipStyle,
       formatter: (params: any[]) => {
         const p = params?.[0];
-        const rel = p?.value?.[0] ?? 0;
-        let html = `<div><strong>${formatRelTime(rel)}</strong></div>`;
+        const rel = Number(p?.value?.[0] ?? 0);
+        let html = formatTooltipHeader(rel);
         for (const row of params) {
           if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
             html += `<div>${row.marker} ${row.seriesName}: <strong>${Number(row.value[1]).toFixed(2)}</strong></div>`;
@@ -144,10 +168,11 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
     ],
     series: [
       {
-        name: "Speed", type: "line", smooth: true, showSymbol: false,
+        name: "Speed", type: "line", smooth: smoothGraphs, showSymbol: false,
         lineStyle: { width: 2, color: "#38bdf8" },
         areaStyle: { color: isDark ? "rgba(56, 189, 248, 0.1)" : "rgba(56, 189, 248, 0.15)" },
-        data: timeline.map((d) => [d.relMs, d.speedKmh]),
+        sampling: smoothGraphs ? "lttb" : undefined,
+        data: speedLineDataSmoothed,
         markLine: lapMarkers.length ? {
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
@@ -164,9 +189,9 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
       ...tooltipStyle,
       formatter: (params: any[]) => {
         const p = params?.[0];
-        const rel = p?.value?.[0] ?? 0;
+        const rel = Number(p?.value?.[0] ?? 0);
         const val = p?.value?.[1];
-        return `<div><strong>${formatRelTime(rel)}</strong></div><div>${p?.marker ?? ""} Elevation: <strong>${val == null ? "--" : Number(val).toFixed(2)} m</strong></div>`;
+        return `${formatTooltipHeader(rel)}<div>${p?.marker ?? ""} Elevation: <strong>${val == null ? "--" : Number(val).toFixed(2)} m</strong></div>`;
       }
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
@@ -194,9 +219,10 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
     ],
     series: [
       {
-        name: "Elevation", type: "line", smooth: true, showSymbol: false,
+        name: "Elevation", type: "line", smooth: smoothGraphs, showSymbol: false,
         lineStyle: { width: 1.5, color: "#f97316" },
-        data: timeline.map((d) => [d.relMs, d.altitudeM]),
+        sampling: smoothGraphs ? "lttb" : undefined,
+        data: elevationLineDataSmoothed,
         markLine: lapMarkers.length ? {
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
@@ -240,8 +266,8 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
       ...tooltipStyle,
       formatter: (params: any[]) => {
         const p = params?.[0];
-        const rel = p?.value?.[0] ?? 0;
-        let html = `<div><strong>${formatRelTime(rel)}</strong></div>`;
+        const rel = Number(p?.value?.[0] ?? 0);
+        let html = formatTooltipHeader(rel);
         for (const row of params) {
           if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
             const unit = row.seriesName === "Cadence" ? " rpm" : " W";
@@ -284,9 +310,10 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
     ],
     series: [
       {
-        name: "Cadence", type: "line", smooth: true, showSymbol: false,
+        name: "Cadence", type: "line", smooth: smoothGraphs, showSymbol: false,
         lineStyle: { width: 2, color: "#22d3ee" },
-        data: timeline.map((d) => [d.relMs, d.cadence]),
+        sampling: smoothGraphs ? "lttb" : undefined,
+        data: cadenceLineDataSmoothed,
         markLine: lapMarkers.length ? {
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
@@ -295,8 +322,9 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         } : undefined,
       },
       ...(hasPowerData ? [{
-        name: "Power", type: "line", yAxisIndex: 1, smooth: true, showSymbol: false,
-        data: timeline.map((d) => [d.relMs, d.power]),
+        name: "Power", type: "line", yAxisIndex: 1, smooth: smoothGraphs, showSymbol: false,
+        sampling: smoothGraphs ? "lttb" : undefined,
+        data: powerLineDataSmoothed,
         lineStyle: { color: "#f97316" },
       }] : []),
     ],
@@ -327,6 +355,84 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         symbolSize: 5,
         itemStyle: { color: "#f59e0b", opacity: 0.7 },
         data: hrPowerScatter,
+      },
+    ],
+  };
+
+  const hrHistogram = (() => {
+    if (!hrValues.length) {
+      return { labels: [] as string[], counts: [] as number[], centers: [] as number[], binWidth: 1 };
+    }
+    const minHr = Math.floor(Math.min(...hrValues));
+    const maxHr = Math.ceil(Math.max(...hrValues));
+    const hrRange = Math.max(1, maxHr - minHr);
+    const targetBins = Math.max(12, Math.min(72, Math.round(Math.sqrt(hrValues.length) * 2.2)));
+    const binWidth = Math.max(1, Math.ceil(hrRange / targetBins));
+    const start = Math.floor(minHr / binWidth) * binWidth;
+    const end = Math.ceil(maxHr / binWidth) * binWidth;
+    const binCount = Math.max(1, Math.ceil((end - start) / binWidth));
+    const counts = new Array<number>(binCount).fill(0);
+
+    for (const hr of hrValues) {
+      const binIndex = Math.min(binCount - 1, Math.max(0, Math.floor((hr - start) / binWidth)));
+      counts[binIndex] += 1;
+    }
+
+    const labels = counts.map((_, idx) => {
+      const left = start + idx * binWidth;
+      const right = left + binWidth;
+      return `${left}-${right}`;
+    });
+
+    const centers = counts.map((_, idx) => {
+      const left = start + idx * binWidth;
+      return left + binWidth / 2;
+    });
+
+    return { labels, counts, centers, binWidth };
+  })();
+
+  const hrHistogramOption = {
+    tooltip: {
+      trigger: "item",
+      ...tooltipStyle,
+      formatter: (p: any) => {
+        const label = String(p?.name ?? "");
+        const count = Number(p?.value ?? 0);
+        return `<div><strong>${label} bpm</strong></div><div>Samples: <strong>${count}</strong></div>`;
+      },
+    },
+    grid: { left: 44, right: 16, top: 28, bottom: 56 },
+    xAxis: {
+      type: "category",
+      name: `bpm (bin ~${hrHistogram.binWidth})`,
+      data: hrHistogram.labels,
+      nameTextStyle: { color: axisColor, fontSize: 11, padding: [26, 0, 0, 0] },
+      axisLabel: { color: axisColor, fontSize: 10, interval: Math.max(0, Math.floor(hrHistogram.labels.length / 12)) },
+      axisLine: { lineStyle: { color: gridLine } },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      name: "count",
+      nameTextStyle: { color: axisColor, fontSize: 11 },
+      axisLabel: { color: axisColor, fontSize: 11 },
+      splitLine: { lineStyle: { color: gridLine } },
+    },
+    series: [
+      {
+        type: "bar",
+        barGap: "0%",
+        barWidth: "96%",
+        itemStyle: { borderRadius: [2, 2, 0, 0] },
+        data: hrHistogram.counts.map((count, idx) => {
+          const centerHr = hrHistogram.centers[idx] ?? 0;
+          const zone = HEART_RATE_ZONES[resolveHeartRateZoneIndex(centerHr)];
+          return {
+            value: count,
+            itemStyle: { color: zone.color },
+          };
+        }),
       },
     ],
   };
@@ -411,7 +517,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         const startMs = minuteIdx * 60000;
         const endMs = (minuteIdx + 1) * 60000;
         const valueText = value === null ? "--" : `${value.toFixed(2)} ${unit}`;
-        return `<div><strong>${label}</strong></div><div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${valueText}</strong></div>`;
+        return `<div><strong>${label}</strong></div>${formatTooltipHeader(startMs)}<div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${valueText}</strong></div>`;
       },
     },
     grid: rowTop.map((top) => ({ left: 58, right: 14, top, height: rowHeight })),
@@ -477,6 +583,12 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         <article className="panel">
           <h3>Heart Rate Zone Time</h3>
           <ReactECharts option={zoneOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+        </article>
+      )}
+      {hasHeartRateData && (
+        <article className="panel">
+          <h3>HR Histogram</h3>
+          <ReactECharts option={hrHistogramOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       )}
       <article className="panel">

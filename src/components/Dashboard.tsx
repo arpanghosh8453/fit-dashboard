@@ -23,6 +23,11 @@ import appIcon from "../assets/app-icon.svg";
 
 type Props = { onLogout: () => Promise<void> };
 
+type VersionBadgeStatus = {
+  state: "hidden" | "latest" | "update";
+  latestVersion: string | null;
+};
+
 type ActivityMetadata = {
   file_id?: {
     product_name?: string | null;
@@ -89,6 +94,11 @@ function parseActivityMetadata(raw?: string): ActivityMetadata | null {
 
 function isTauriRuntime(): boolean {
   return isTauri();
+}
+
+function normalizeSemver(value: string): string | null {
+  const match = value.trim().match(/^v?(\d+\.\d+\.\d+)$/i);
+  return match ? match[1] : null;
 }
 
 function computeRecordStats(records: RecordPoint[]) {
@@ -270,6 +280,9 @@ export function Dashboard({ onLogout }: Props) {
     x: number; y: number; activityId: number; activityName: string;
   } | null>(null);
   const [telemetryZoom, setTelemetryZoom] = useState<{ start: number; end: number } | null>(null);
+  const [smoothGraphs, setSmoothGraphs] = useState(true);
+  const [appVersion, setAppVersion] = useState("unknown");
+  const [versionBadgeStatus, setVersionBadgeStatus] = useState<VersionBadgeStatus>({ state: "hidden", latestVersion: null });
 
   // Inline rename/delete state
   const [renameTarget, setRenameTarget] = useState<{ id: number; name: string } | null>(null);
@@ -290,6 +303,64 @@ export function Dashboard({ onLogout }: Props) {
     const close = () => { setContextMenu(null); setBulkExportDropdownOpen(false); setIsSortOpen(false); };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolveCurrentVersion = async (): Promise<string> => {
+      const fallbackVersion = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "unknown";
+      try {
+        if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+          const { getVersion } = await import("@tauri-apps/api/app");
+          const version = await getVersion();
+          return version || fallbackVersion;
+        }
+      } catch {
+        // Ignore and continue with fallback for web mode or API failures.
+      }
+      return fallbackVersion;
+    };
+
+    const loadVersionStatus = async () => {
+      const current = await resolveCurrentVersion();
+      if (cancelled) return;
+      setAppVersion(current);
+
+      try {
+        const response = await fetch("https://api.github.com/repos/arpanghosh8453/fit-dashboard/releases/latest", {
+          headers: { Accept: "application/vnd.github+json" },
+        });
+        if (!response.ok) throw new Error(`GitHub status ${response.status}`);
+
+        const payload = (await response.json()) as { tag_name?: string };
+        const latest = normalizeSemver(payload.tag_name ?? "");
+        const currentNormalized = normalizeSemver(current);
+        if (!latest || !currentNormalized) {
+          if (!cancelled) {
+            setVersionBadgeStatus({ state: "hidden", latestVersion: null });
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setVersionBadgeStatus({
+            state: latest === currentNormalized ? "latest" : "update",
+            latestVersion: latest,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setVersionBadgeStatus({ state: "hidden", latestVersion: null });
+        }
+      }
+    };
+
+    void loadVersionStatus();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -969,7 +1040,7 @@ export function Dashboard({ onLogout }: Props) {
         </div>
       </header>
 
-      <SettingsPanel />
+      <SettingsPanel appVersion={appVersion} versionBadgeStatus={versionBadgeStatus} />
 
       {/* ── Body ─────────────────────────────────────────────── */}
       <div className={`app-body ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -1315,7 +1386,25 @@ export function Dashboard({ onLogout }: Props) {
             </div>
 
             <div className="sidebar-footer">
-              <span>{activities.length} file(s) imported</span>
+              <div className="sidebar-footer-left">
+                <span>{activities.length} file(s) imported</span>
+                {versionBadgeStatus.state === "latest" && (
+                  <span className="version-status-badge latest" title="You are on the latest release">
+                    Latest
+                  </span>
+                )}
+                {versionBadgeStatus.state === "update" && versionBadgeStatus.latestVersion && (
+                  <a
+                    className="version-status-badge update"
+                    href="https://fitdashboard.app"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title={`A newer release is available: ${versionBadgeStatus.latestVersion}`}
+                  >
+                    Update to {versionBadgeStatus.latestVersion}
+                  </a>
+                )}
+              </div>
               <button onClick={() => void refresh()} title="Refresh data"><IconRefresh /></button>
             </div>
           </div>
@@ -1371,6 +1460,14 @@ export function Dashboard({ onLogout }: Props) {
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
                     {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
                     {deviceBadgeSerial && <span className="badge device">SN {deviceBadgeSerial}</span>}
+                    <label className="detail-toggle-badge" title="Use dynamic rolling average smoothing. As you zoom in, more detailed points are used.">
+                      <input
+                        type="checkbox"
+                        checked={smoothGraphs}
+                        onChange={(e) => setSmoothGraphs(e.target.checked)}
+                      />
+                      <span>Smooth graphs</span>
+                    </label>
                     <button className="btn-secondary" style={{ padding: "0.25rem 0.55rem", fontSize: "0.74rem" }} onClick={() => setTelemetryZoom(null)}>
                       Reset Zoom
                     </button>
@@ -1396,10 +1493,10 @@ export function Dashboard({ onLogout }: Props) {
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>Heart Rate and Pace</h3><ActivityChart records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} /></div>
+                <div className="panel"><h3>Heart Rate and Pace</h3><ActivityChart records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} /></div>
                 <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
               </div>
-              <ActivityInsights records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} />
+              <ActivityInsights records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
             </>
           ) : (
             <div className="empty-state">

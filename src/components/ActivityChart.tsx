@@ -2,6 +2,7 @@ import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
 import { HEART_RATE_ZONES } from "../lib/hrZones";
+import { applyRollingAverageSeries, getDynamicSmoothingWindow } from "../lib/chartSmoothing";
 
 type Props = {
   records: RecordPoint[];
@@ -9,10 +10,13 @@ type Props = {
   zoomRange?: { start: number; end: number } | null;
   onZoomChange?: (range: { start: number; end: number }) => void;
   lapTimestampsUtc?: string[];
+  smoothGraphs?: boolean;
 };
 
-export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTimestampsUtc = [] }: Props) {
+export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTimestampsUtc = [], smoothGraphs = true }: Props) {
   const t0 = records[0]?.timestamp_ms ?? 0;
+  const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
+  const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
   
   // Format MM:SS or HH:MM:SS
   const formatRelTime = (ms: number) => {
@@ -26,7 +30,18 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  const hrSeriesData = records.map((r) => [r.timestamp_ms - t0, r.heart_rate ?? null, r.timestamp_ms]);
+  const formatAbsTime = (relMs: number) => {
+    const absolute = new Date(t0 + Math.max(0, relMs));
+    const hh = String(absolute.getHours()).padStart(2, "0");
+    const mm = String(absolute.getMinutes()).padStart(2, "0");
+    const ss = String(absolute.getSeconds()).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  };
+
+  const formatTooltipHeader = (relMs: number) =>
+    `<div style="display:flex;align-items:center;gap:6px;"><strong>${formatRelTime(relMs)}</strong><span style="display:inline-flex;align-items:center;border-radius:999px;padding:1px 6px;font-size:11px;background:rgba(148,163,184,0.22);">${formatAbsTime(relMs)}</span></div>`;
+
+  const hrSeriesData = records.map((r) => [r.timestamp_ms - t0, r.heart_rate ?? null, r.timestamp_ms, typeof r.distance_m === "number" ? r.distance_m / 1000 : null]);
   const paceSeriesData = records.map((r, i) => {
     const relMs = r.timestamp_ms - t0;
     const prev = i > 0 ? records[i - 1] : undefined;
@@ -39,6 +54,9 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
     const paceMinPerKm = speedMs && speedMs > 0 ? 1000 / (speedMs * 60) : null;
     return [relMs, paceMinPerKm, r.timestamp_ms];
   });
+
+  const hrSeriesSmoothed = smoothGraphs ? applyRollingAverageSeries(hrSeriesData, 1, smoothWindow) : hrSeriesData;
+  const paceSeriesSmoothed = smoothGraphs ? applyRollingAverageSeries(paceSeriesData, 1, smoothWindow) : paceSeriesData;
 
   const lapMarkers = lapTimestampsUtc
     .slice(1)
@@ -66,12 +84,16 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
       textStyle: { color: tooltipText, fontSize: 12 },
       formatter: (params: any) => {
         const p = params[0];
-        const relTime = formatRelTime(p.value[0]);
-        let html = `<div><strong>${relTime}</strong></div>`;
+        const relTime = Number(p.value[0] ?? 0);
+        let html = formatTooltipHeader(relTime);
         for (const s of params) {
           if (s.value[1] !== null && s.value[1] !== undefined) {
             html += `<div>${s.marker} ${s.seriesName}: <strong>${s.value[1]}</strong></div>`;
           }
+        }
+        const distanceKm = p?.value?.[3];
+        if (distanceKm !== null && distanceKm !== undefined) {
+          html += `<div style="margin-top:2px;">Distance: <strong>${Number(distanceKm).toFixed(2)} km</strong></div>`;
         }
         return html;
       }
@@ -127,11 +149,12 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
       {
         name: "Heart Rate",
         type: "line",
-        smooth: true,
+        smooth: smoothGraphs,
         showSymbol: false,
         lineStyle: { width: 2 },
         areaStyle: { opacity: 0.12 },
-        data: hrSeriesData,
+        sampling: smoothGraphs ? "lttb" : undefined,
+        data: hrSeriesSmoothed,
         markLine: lapMarkers.length ? {
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
@@ -150,8 +173,8 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
       textStyle: { color: tooltipText, fontSize: 12 },
       formatter: (params: any) => {
         const p = params[0];
-        const relTime = formatRelTime(p.value[0]);
-        let html = `<div><strong>${relTime}</strong></div>`;
+        const relTime = Number(p.value[0] ?? 0);
+        let html = formatTooltipHeader(relTime);
         for (const s of params) {
           if (s.value[1] !== null && s.value[1] !== undefined) {
             const pace = Number(s.value[1]);
@@ -200,11 +223,12 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
       {
         name: "Pace",
         type: "line",
-        smooth: true,
+        smooth: smoothGraphs,
         showSymbol: false,
         lineStyle: { width: 2, color: "#f43f5e" },
         areaStyle: { color: isDark ? "rgba(244, 63, 94, 0.1)" : "rgba(244, 63, 94, 0.12)" },
-        data: paceSeriesData,
+        sampling: smoothGraphs ? "lttb" : undefined,
+        data: paceSeriesSmoothed,
         markLine: lapMarkers.length ? {
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
@@ -227,9 +251,9 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
   };
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <ReactECharts option={hrOption} onEvents={onEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 220, width: "100%" }} />
-      <ReactECharts option={paceOption} onEvents={onEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 220, width: "100%" }} />
+    <div style={{ display: "grid", gap: 12, minWidth: 0, width: "100%", overflow: "hidden" }}>
+      <ReactECharts option={hrOption} onEvents={onEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
+      <ReactECharts option={paceOption} onEvents={onEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 220, width: "100%", minWidth: 0, overflow: "hidden" }} />
     </div>
   );
 }

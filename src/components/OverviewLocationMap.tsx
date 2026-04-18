@@ -292,7 +292,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
   }, [geojson]);
 
   return (
-    <div className="panel">
+    <div className="panel overview-location-panel">
       <div className="map-header" style={{ marginBottom: "0.6rem" }}>
         <div>
           <h3 style={{ marginBottom: "0.32rem" }}>Explored Locations</h3>

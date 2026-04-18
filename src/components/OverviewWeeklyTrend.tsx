@@ -112,9 +112,11 @@ export function OverviewWeeklyTrend({ activities, distanceUnit, theme }: Props) 
   };
 
   return (
-    <div className="panel">
+    <div className="panel overview-weekly-trend-panel">
       <h3>Weekly Training Trend</h3>
-      <ReactECharts option={option} notMerge style={{ height: 300, width: "100%" }} />
+      <div className="overview-weekly-trend-chart">
+        <ReactECharts option={option} notMerge style={{ height: "100%", width: "100%" }} />
+      </div>
     </div>
   );
 }

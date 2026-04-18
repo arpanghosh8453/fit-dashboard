@@ -14,7 +14,7 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
           No subscriptions. No advertisements. You are in control of your data. Support us and get your
         </span>
         <span className="donation-banner-text donation-banner-text--compact">
-          Support us and get your
+          Get your
         </span>
         <a
           className="donation-banner-link"
@@ -24,7 +24,7 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
         >
           supporter badge
         </a>
-        <span className="donation-banner-text">today!</span>
+        <span className="donation-banner-text">today</span>
       </div>
       <button className="donation-banner-dismiss" onClick={onDismiss} title="Dismiss banner" aria-label="Dismiss banner">
         ×

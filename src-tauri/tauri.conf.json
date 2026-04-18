@@ -16,6 +16,8 @@
         "title": "FIT Dashboard",
         "width": 1200,
         "height": 800,
+        "minWidth": 450,
+        "minHeight": 450,
         "resizable": true
       }
     ]
