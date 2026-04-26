@@ -218,6 +218,31 @@ Tips:
 - You can import `.fit`, `.tcx`, and `.gpx` files in FIT Dashboard.
 - If duplicate files are imported, FIT Dashboard will skip them automatically. But if you have the save activity file in different format, it may still cause duplicate. We de-duplicate them based on file hash and exact start and end timestamp match of an activity. 
 
+### Option C: Use Garmin-CLI tool
+
+If you prefer the command line, [Garmin-CLI](https://github.com/vicentereig/garmin-cli) can list your activities and download the original Garmin export for a specific activity. This can be easily automated to batch download multiple activities.
+
+**Steps:**
+
+1. Install Garmin-CLI (`cargo install garmin-cli`, or use the pre-built MacOS/linux binary).
+2. Sign in once with password and OTP (if applicable): `garmin auth login`.
+3. List your activities and copy the activity ID you want: `garmin activities list`. use `--limit 20` to limit the result to last 20 activities
+4. Download the original FIT export for that activity: `garmin activities download <activity-id>`
+
+5. Unzip the downloaded archive to get the `.fit` file, then import that file into FIT Dashboard.
+
+> [!TIP]
+> You are automate the whole process with this one liner (update the limit to match your need, here it's set as 50) 
+> ```bash
+> garmin activities list --limit 50 | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print $1}' | while read -r id; do garmin activities download "$id" && unzip "activity_${id}.zip" && rm "activity_${id}.zip"; done
+>``` 
+
+When to use this option:
+
+- You want to batch pull individual activities without using the Garmin Connect web UI.
+- You want a repeatable way to fetch specific activity files by ID.
+
+
 ## Usage
 
 1. **Import**: Open the sidebar Import section and select one or more `.fit` files
