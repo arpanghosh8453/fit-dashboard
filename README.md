@@ -22,6 +22,12 @@
 
 ---
 
+> [!IMPORTANT]
+> Garmin is a registered trademark of Garmin Ltd. or its subsidiaries. This project is an independent, open-source tool and is not affiliated with, endorsed by, sponsored by, or approved by Garmin Ltd.
+
+> [!NOTE]
+> This project repository is dynamically mirrored in [Codeberg](https://codeberg.org/arpanghosh8453/fit-dashboard) as a backup. An alternative docker image is available at [codeberg.org/arpanghosh8453/fit-dashboard](https://codeberg.org/arpanghosh8453/-/packages/container/fit-dashboard).
+
 ## Contents
 
 - [Features](#features)
