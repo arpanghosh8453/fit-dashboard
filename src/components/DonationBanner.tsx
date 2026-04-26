@@ -1,3 +1,5 @@
+import { openExternalLink } from "../lib/links";
+
 type Props = {
   supporterBadge: boolean;
   dismissed: boolean;
@@ -11,10 +13,21 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
     <div className="donation-banner" role="region" aria-label="Supporter banner" style={{ textAlign: "center" }}>
       <div className="donation-banner-content">
         <span className="donation-banner-text donation-banner-text--full">
-          No subscriptions. No advertisements. You are in control of your data. Support us and get your
+          No subscriptions. No advertisements. You are in control of your data.
         </span>
-        <span className="donation-banner-text donation-banner-text--compact">
-          Get your
+        {" "}
+        <span className="donation-banner-text">
+          Support on{" "}
+          <a
+            className="donation-banner-text-link"
+            href="https://ko-fi.com/arpandesign"
+            target="_blank"
+            rel="noreferrer"
+            onClick={openExternalLink}
+          >
+            Ko-Fi
+          </a>
+          {" "}or get your
         </span>
         {" "}
         <a
@@ -22,11 +35,10 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
           href="https://ko-fi.com/s/ec2c3036ee"
           target="_blank"
           rel="noreferrer"
+          onClick={openExternalLink}
         >
           supporter badge
         </a>
-        {" "}
-        <span className="donation-banner-text">today</span>
       </div>
       <button className="donation-banner-dismiss" onClick={onDismiss} title="Dismiss banner" aria-label="Dismiss banner">
         ×
@@ -34,3 +46,4 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
     </div>
   );
 }
+

@@ -2310,6 +2310,19 @@ button:focus-visible {
   line-height: 1.1;
 }
 
+.donation-banner-text-link {
+  color: #c76f00;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.donation-banner-text-link:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+  filter: brightness(1.15);
+}
+
 .donation-banner-link:hover {
   filter: brightness(1.08);
 }
@@ -2342,6 +2355,10 @@ button:focus-visible {
 
 :root[data-theme="dark"] .donation-banner-text {
   color: #eef3fb;
+}
+
+:root[data-theme="dark"] .donation-banner-text-link {
+  color: #fbcc39;
 }
 
 :root[data-theme="dark"] .donation-banner-dismiss {

@@ -49,6 +49,7 @@ pub fn run(state: AppState) -> anyhow::Result<()> {
     tracing::info!("starting tauri app runtime");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(state)
         .setup(|app| {
             // Some Linux desktops ignore SVG bundle metadata for live window icons,

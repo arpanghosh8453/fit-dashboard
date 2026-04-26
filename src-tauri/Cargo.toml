@@ -25,6 +25,7 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri = { version = "2", optional = true , features = ["image-png"] }
 tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-shell = { version = "2.3.5", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -36,4 +37,4 @@ static_vcruntime = "2"
 [features]
 default = ["web"]
 web = []
-tauri-app = ["dep:tauri", "dep:tauri-plugin-dialog"]
+tauri-app = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-shell"]

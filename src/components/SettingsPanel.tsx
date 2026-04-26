@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSettingsStore } from "../stores/settingsStore";
 import { api } from "../lib/api";
+import { openExternalLink } from "../lib/links";
 
 type StorageInfo = {
   data_dir: string;
@@ -168,16 +169,16 @@ export function SettingsPanel({ appVersion, versionBadgeStatus }: Props) {
         <div className="links-box">
           <strong>Links and Contact</strong>
           <div className="settings-links-grid">
-            <a className="settings-link-btn" href="https://github.com/arpanghosh8453/fit-dashboard/issues/new/choose" target="_blank" rel="noreferrer noopener">
+            <a className="settings-link-btn" href="https://github.com/arpanghosh8453/fit-dashboard/issues/new/choose" target="_blank" rel="noreferrer noopener" onClick={openExternalLink}>
               <IconBug /> Bug Report
             </a>
-            <a className="settings-link-btn" href="https://discord.gg/xVu4gK75zG" target="_blank" rel="noreferrer noopener">
+            <a className="settings-link-btn" href="https://discord.gg/xVu4gK75zG" target="_blank" rel="noreferrer noopener" onClick={openExternalLink}>
               <IconDiscord /> Join Discord
             </a>
-            <a className="settings-link-btn" href="https://fitdashboard.app" target="_blank" rel="noreferrer noopener">
+            <a className="settings-link-btn" href="https://fitdashboard.app" target="_blank" rel="noreferrer noopener" onClick={openExternalLink}>
               <IconGlobe /> Website
             </a>
-            <a className="settings-link-btn" href="https://www.fitdashboard.app/#about" target="_blank" rel="noreferrer noopener">
+            <a className="settings-link-btn" href="https://www.fitdashboard.app/#about" target="_blank" rel="noreferrer noopener" onClick={openExternalLink}>
               <IconMail /> Contact
             </a>
           </div>
@@ -252,6 +253,7 @@ export function SettingsPanel({ appVersion, versionBadgeStatus }: Props) {
                     target="_blank"
                     rel="noreferrer noopener"
                     title={`A newer release is available: ${versionBadgeStatus.latestVersion}`}
+                    onClick={openExternalLink}
                   >
                     Update to {versionBadgeStatus.latestVersion}
                   </a>
