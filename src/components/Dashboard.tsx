@@ -9,6 +9,7 @@ import { ActivityContributionHeatmap } from "./ActivityContributionHeatmap";
 import { OverviewLocationMap } from "./OverviewLocationMap";
 import { OverviewSportTypeDonut } from "./OverviewSportTypeDonut";
 import { OverviewWeeklyTrend } from "./OverviewWeeklyTrend";
+import { OverviewActivityTable } from "./OverviewActivityTable";
 import { DatePickerPopover } from "./DatePickerPopover";
 import { DateRange } from "react-day-picker";
 import { DonationBanner } from "./DonationBanner";
@@ -20,6 +21,14 @@ import { exportSingleActivity, exportBulkActivities, type ExportFormat, type Bul
 import { useSettingsStore } from "../stores/settingsStore";
 import type { Activity, RecordPoint } from "../types";
 import appIcon from "../assets/app-icon.svg";
+import {
+  convertElevationMeters,
+  convertSpeedKmh,
+  distanceDivisor,
+  distanceLabel,
+  elevationLabel,
+  speedLabel,
+} from "../lib/units";
 
 type Props = { onLogout: () => Promise<void> };
 
@@ -29,6 +38,7 @@ type VersionBadgeStatus = {
 };
 
 type ActivityMetadata = {
+  heart_rate_zone_bounds_bpm?: number[];
   file_id?: {
     product_name?: string | null;
     serial_number?: number | null;
@@ -45,10 +55,24 @@ type ActivityMetadata = {
     avg_cadence?: number | null;
     total_elapsed_time_s?: number | null;
     total_distance_m?: number | null;
+    total_calories?: number | null;
   };
   laps?: Array<{
     start_ts_utc?: string | null;
     end_ts_utc?: string | null;
+    total_elapsed_time_s?: number | null;
+    total_timer_time_s?: number | null;
+    total_distance_m?: number | null;
+    avg_speed_m_s?: number | null;
+    max_speed_m_s?: number | null;
+    avg_heart_rate?: number | null;
+    max_heart_rate?: number | null;
+    total_ascent_m?: number | null;
+    total_descent_m?: number | null;
+    avg_cadence?: number | null;
+    max_cadence?: number | null;
+    total_calories?: number | null;
+    best_speed_m_s?: number | null;
   }>;
 };
 
@@ -166,6 +190,12 @@ function IconDevice() {
 function IconAvg() {
   return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><line x1="4" y1="20" x2="20" y2="4" /><circle cx="6" cy="6" r="2" /><circle cx="18" cy="18" r="2" /></svg>;
 }
+function IconCadence() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.5" /><path d="M12 4v3" /><path d="M20 12h-3" /><path d="M12 20v-3" /><path d="M4 12h3" /></svg>;
+}
+function IconBattery() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><rect x="2" y="7" width="18" height="10" rx="2" /><line x1="22" y1="11" x2="22" y2="13" /><path d="M8 10l3 2-3 2" /><path d="M14 10v4" /></svg>;
+}
 function IconSearch() {
   return <svg width="14" height="14" viewBox="0 0 24 24" {...svgProps}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>;
 }
@@ -230,6 +260,9 @@ function IconBarChart({ size = 32 }: { size?: number }) {
 }
 function IconClipboard() {
   return <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" /></svg>;
+}
+function IconFlame() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z" /></svg>;
 }
 
 /* ── Dashboard Component ─────────────────────────────────────────── */
@@ -442,11 +475,11 @@ export function Dashboard({ onLogout }: Props) {
   const filteredSports = Array.from(new Set(filtered.map((a) => a.sport).filter(Boolean)));
   const filteredDevices = Array.from(new Set(filtered.map((a) => a.device).filter(Boolean)));
   const selectedRecords = tab === "overview" ? overviewRecords : records;
-  const distanceDivisor = distanceUnit === "km" ? 1000 : 1609.344;
-  const distanceSuffix = distanceUnit;
+  const distanceDivisorValue = distanceDivisor(distanceUnit);
+  const distanceSuffix = distanceLabel(distanceUnit);
   const filteredTotalDistanceM = filtered.reduce((sum, a) => sum + a.distance_m, 0);
   const filteredTotalDurationS = filtered.reduce((sum, a) => sum + a.duration_s, 0);
-  const totalDistance = filteredTotalDistanceM / distanceDivisor;
+  const totalDistance = filteredTotalDistanceM / distanceDivisorValue;
   const totalDuration = filteredTotalDurationS;
   const avgDistance = filtered.length ? totalDistance / filtered.length : 0;
   const avgDuration = filtered.length ? totalDuration / filtered.length : 0;
@@ -779,7 +812,26 @@ export function Dashboard({ onLogout }: Props) {
 
         try {
           const result = await api.processSyncFile(path);
-          if (result.status === "imported") imported++;
+          if (result.status === "imported") {
+            imported++;
+            if (imported % 10 === 0) {
+              pushImportProgress(
+                { completed: i + 1, total, current: `Refreshing after ${imported} successful syncs...`, status: "refreshing" },
+                `Sync: Imported ${imported} files. Refreshing list and stats...`
+              );
+              await waitForUiPaint();
+              try {
+                await refresh();
+              } catch (err) {
+                tracingError("sync intermediate refresh failed", err);
+              }
+              pushImportProgress(
+                { completed: i + 1, total, current: fileNameDisplay, currentIndex: i + 1, status: "processing" },
+                `Sync: ${i + 1}/${total} - ${fileNameDisplay}`
+              );
+              await waitForUiPaint();
+            }
+          }
           else if (result.status === "duplicate") duplicates++;
           else if (result.status === "blacklisted") blacklisted++;
           else if (result.status === "skipped") skipped++;
@@ -966,25 +1018,25 @@ export function Dashboard({ onLogout }: Props) {
     ? String(selectedMetadata.file_id.serial_number)
     : "";
   const detailStats = useMemo(() => {
-    if (!selectedActivity) return [] as Array<{ key: string; label: string; value: string; secondary?: string; icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "avg" }>;
-    const out: Array<{ key: string; label: string; value: string; secondary?: string; icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "avg" }> = [];
+    if (!selectedActivity) return [] as Array<{ key: string; label: string; value: string; secondary?: string; icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "cadence" | "battery" | "avg" | "flame" }>;
+    const out: Array<{ key: string; label: string; value: string; secondary?: string; icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "cadence" | "battery" | "avg" | "flame" }> = [];
     const seen = new Set<string>();
-    const push = (key: string, label: string, value: string | null | undefined, icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "avg", secondary?: string) => {
+    const push = (key: string, label: string, value: string | null | undefined, icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "cadence" | "battery" | "avg" | "flame", secondary?: string) => {
       if (!value || seen.has(key)) return;
       seen.add(key);
       out.push({ key, label, value, secondary, icon });
     };
 
     push("duration", "Duration", formatDuration(selectedActivity.duration_s), "clock");
-    push("distance", "Distance", `${(selectedActivity.distance_m / distanceDivisor).toFixed(2)} ${distanceSuffix}`, "distance");
+    push("distance", "Distance", `${(selectedActivity.distance_m / distanceDivisorValue).toFixed(2)} ${distanceSuffix}`, "distance");
 
-    if (recordStats.avgSpeed > 0) push("avg_speed", "Avg Speed", `${recordStats.avgSpeed.toFixed(1)} km/h`, "speed");
-    if (recordStats.maxSpeed > 0) push("max_speed", "Max Speed", `${recordStats.maxSpeed.toFixed(1)} km/h`, "speed");
+    if (recordStats.avgSpeed > 0) push("avg_speed", "Avg Speed", `${convertSpeedKmh(recordStats.avgSpeed, distanceUnit).toFixed(1)} ${speedLabel(distanceUnit)}`, "speed");
+    if (recordStats.maxSpeed > 0) push("max_speed", "Max Speed", `${convertSpeedKmh(recordStats.maxSpeed, distanceUnit).toFixed(1)} ${speedLabel(distanceUnit)}`, "speed");
 
     const session = selectedMetadata?.session ?? {};
     const metric = selectedMetadata?.activity_metrics ?? {};
     const avgPaceSec = selectedActivity.distance_m > 0
-      ? selectedActivity.duration_s / (selectedActivity.distance_m / distanceDivisor)
+      ? selectedActivity.duration_s / (selectedActivity.distance_m / distanceDivisorValue)
       : 0;
     const avgPaceText = formatPace(avgPaceSec, distanceSuffix);
     const avgHr = recordStats.avgHr > 0 ? Math.round(recordStats.avgHr) : (typeof session.avg_heart_rate === "number" ? session.avg_heart_rate : null);
@@ -992,18 +1044,61 @@ export function Dashboard({ onLogout }: Props) {
     if (avgHr && avgHr > 0) push("avg_hr", "Avg HR", `${Math.round(avgHr)} bpm`, "heart", avgPaceText !== "-" ? `Pace ${avgPaceText}` : undefined);
     if (maxHr && maxHr > 0) push("max_hr", "Max HR", `${Math.round(maxHr)} bpm`, "heart");
 
-    if (recordStats.maxAlt > 0) push("max_alt", "Max Altitude", `${recordStats.maxAlt.toFixed(0)} m`, "mountain");
+    if (recordStats.maxAlt > 0) push("max_alt", "Max Altitude", `${convertElevationMeters(recordStats.maxAlt, distanceUnit).toFixed(0)} ${elevationLabel(distanceUnit)}`, "mountain");
     if (recordStats.avgPower > 0) push("avg_power", "Avg Power", `${Math.round(recordStats.avgPower)} W`, "power");
 
-    if (typeof session.avg_cadence === "number" && session.avg_cadence > 0) push("avg_cadence", "Avg Cadence", `${Math.round(session.avg_cadence)} rpm`, "avg");
-    if (typeof session.max_cadence === "number" && session.max_cadence > 0) push("max_cadence", "Max Cadence", `${Math.round(session.max_cadence)} rpm`, "avg");
-    if (typeof session.beginning_body_battery === "number") push("bb_start", "Body Battery Start", `${session.beginning_body_battery}`, "avg");
-    if (typeof session.ending_body_battery === "number") push("bb_end", "Body Battery End", `${session.ending_body_battery}`, "avg");
+    if (typeof session.avg_cadence === "number" && session.avg_cadence > 0) push("avg_cadence", "Avg Cadence", `${Math.round(session.avg_cadence)} rpm`, "cadence");
+    if (typeof session.max_cadence === "number" && session.max_cadence > 0) push("max_cadence", "Max Cadence", `${Math.round(session.max_cadence)} rpm`, "cadence");
+    if (typeof session.beginning_body_battery === "number" && typeof session.ending_body_battery === "number") {
+      const delta = session.ending_body_battery - session.beginning_body_battery;
+      const deltaLabel = delta > 0 ? `+${delta}` : `${delta}`;
+      push(
+        "bb_change",
+        "Body Battery Change",
+        deltaLabel,
+        "battery",
+        `${session.beginning_body_battery} -> ${session.ending_body_battery}`
+      );
+    }
     if (typeof metric.vo2_max === "number" && metric.vo2_max > 0) push("vo2_max", "VO2 Max", `${metric.vo2_max.toFixed(1)}`, "avg");
+    if (typeof session.total_calories === "number" && session.total_calories > 0) push("total_calories", "Calories", `${Math.round(session.total_calories)} kcal`, "flame");
     if (lapTimestampsUtc.length > 0) push("laps", "Laps", String(lapTimestampsUtc.length), "avg");
 
     return out;
-  }, [selectedActivity, selectedMetadata, recordStats, distanceDivisor, distanceSuffix, lapTimestampsUtc.length]);
+  }, [selectedActivity, selectedMetadata, recordStats, distanceDivisorValue, distanceSuffix, distanceUnit, lapTimestampsUtc.length]);
+
+  const lapRows = useMemo(() => {
+    const laps = selectedMetadata?.laps ?? [];
+    let cumulativeSeconds = 0;
+
+    return laps.map((lap, index) => {
+      const lapTimeSec = typeof lap.total_timer_time_s === "number"
+        ? lap.total_timer_time_s
+        : (typeof lap.total_elapsed_time_s === "number" ? lap.total_elapsed_time_s : null);
+      if (lapTimeSec != null) cumulativeSeconds += Math.max(0, lapTimeSec);
+      const distanceMeters = typeof lap.total_distance_m === "number" ? lap.total_distance_m : null;
+      const avgPace = lap.avg_speed_m_s && lap.avg_speed_m_s > 0
+        ? formatPace((distanceDivisorValue / lap.avg_speed_m_s), distanceSuffix)
+        : "-";
+      const bestPace = lap.best_speed_m_s && lap.best_speed_m_s > 0
+        ? formatPace((distanceDivisorValue / lap.best_speed_m_s), distanceSuffix)
+        : "-";
+      return {
+        index: index + 1,
+        lapTimeSec,
+        cumulativeSeconds,
+        distanceMeters,
+        avgPace,
+        avgHr: lap.avg_heart_rate,
+        maxHr: lap.max_heart_rate,
+        ascentMeters: lap.total_ascent_m,
+        descentMeters: lap.total_descent_m,
+        avgCadence: lap.avg_cadence,
+        calories: lap.total_calories,
+        bestPace,
+      };
+    });
+  }, [selectedMetadata?.laps, distanceDivisorValue, distanceSuffix]);
 
   return (
     <div className="app-shell">
@@ -1365,7 +1460,7 @@ export function Dashboard({ onLogout }: Props) {
                               <span>{formatDateShort(a.start_ts_utc)} &bull; {formatTimeShort(a.start_ts_utc)}</span>
                             </div>
                             <div className="activity-meta-row" style={{ fontWeight: 600 }}>
-                              <span className="activity-pill">{(a.distance_m / distanceDivisor).toFixed(1)} {distanceSuffix}</span>
+                              <span className="activity-pill">{(a.distance_m / distanceDivisorValue).toFixed(1)} {distanceSuffix}</span>
                               <span className="spacer" />
                               <span className="activity-pill">{formatDuration(a.duration_s)}</span>
                             </div>
@@ -1447,10 +1542,11 @@ export function Dashboard({ onLogout }: Props) {
               </div>
               <OverviewLocationMap records={overviewRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} />
               <OverviewWeeklyTrend activities={filtered} distanceUnit={distanceUnit} theme={theme} />
+              <OverviewActivityTable activities={filtered} distanceUnit={distanceUnit} timeFormat={timeFormat} />
             </>
             )
           ) : tab === "compare" ? (
-            <CompareCharts compareIds={compareIds} activities={activities} theme={theme} />
+            <CompareCharts compareIds={compareIds} activities={activities} theme={theme} distanceUnit={distanceUnit} />
           ) : selectedActivity ? (
             <>
               <div className="detail-header">
@@ -1483,7 +1579,10 @@ export function Dashboard({ onLogout }: Props) {
                         {s.icon === "heart" && <IconHeart />}
                         {s.icon === "mountain" && <IconMountain />}
                         {s.icon === "power" && <IconPower />}
+                        {s.icon === "cadence" && <IconCadence />}
+                        {s.icon === "battery" && <IconBattery />}
                         {s.icon === "avg" && <IconAvg />}
+                        {s.icon === "flame" && <IconFlame />}
                       </span>
                       <span className="mini-value">{s.value}</span>
                       <span className="mini-label">{s.label}</span>
@@ -1493,10 +1592,91 @@ export function Dashboard({ onLogout }: Props) {
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>Heart Rate and Pace</h3><ActivityChart records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} /></div>
+                <div className="panel"><h3>Heart Rate and Pace</h3><ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} /></div>
                 <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
               </div>
-              <ActivityInsights records={selectedRecords} theme={theme} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
+              <ActivityInsights records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
+              {lapRows.length > 0 && (
+                <div className="panel laps-table-panel">
+                  <h3>Laps</h3>
+                  <div className="laps-table-wrap">
+                    <table className="laps-table">
+                      <thead>
+                        <tr>
+                          <th>Laps</th>
+                          <th>Time</th>
+                          <th>Cumulative Time</th>
+                          <th>Distance</th>
+                          <th>Avg Pace</th>
+                          <th>Avg HR</th>
+                          <th>Max HR</th>
+                          <th>Total Ascent</th>
+                          <th>Total Descent</th>
+                          <th>Avg Cadence</th>
+                          <th>Calories</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lapRows.map((lap) => (
+                          <tr key={`lap-${lap.index}`}>
+                            <td>{lap.index}</td>
+                            <td>{lap.lapTimeSec != null ? formatDuration(lap.lapTimeSec) : "-"}</td>
+                            <td>{formatDuration(lap.cumulativeSeconds)}</td>
+                            <td>{lap.distanceMeters != null ? `${(lap.distanceMeters / distanceDivisorValue).toFixed(2)} ${distanceSuffix}` : "-"}</td>
+                            <td>{lap.avgPace}</td>
+                            <td>{typeof lap.avgHr === "number" ? Math.round(lap.avgHr) : "-"}</td>
+                            <td>{typeof lap.maxHr === "number" ? Math.round(lap.maxHr) : "-"}</td>
+                            <td>{typeof lap.ascentMeters === "number" ? `${Math.round(convertElevationMeters(lap.ascentMeters, distanceUnit))} ${elevationLabel(distanceUnit)}` : "-"}</td>
+                            <td>{typeof lap.descentMeters === "number" ? `${Math.round(convertElevationMeters(lap.descentMeters, distanceUnit))} ${elevationLabel(distanceUnit)}` : "-"}</td>
+                            <td>{typeof lap.avgCadence === "number" ? Math.round(lap.avgCadence) : "-"}</td>
+                            <td>{typeof lap.calories === "number" ? Math.round(lap.calories) : "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td>Summary</td>
+                          <td>{formatDuration(lapRows.reduce((a, b) => a + (b.lapTimeSec || 0), 0))}</td>
+                          <td>-</td>
+                          <td>{(() => {
+                            const d = lapRows.reduce((a, b) => a + (b.distanceMeters || 0), 0);
+                            return d > 0 ? `${(d / distanceDivisorValue).toFixed(2)} ${distanceSuffix}` : "-";
+                          })()}</td>
+                          <td>{(() => {
+                            const d = lapRows.reduce((a, b) => a + (b.distanceMeters || 0), 0);
+                            const t = lapRows.reduce((a, b) => a + (b.lapTimeSec || 0), 0);
+                            return d > 0 && t > 0 ? formatPace((distanceDivisorValue / (d / t)), distanceSuffix) : "-";
+                          })()}</td>
+                          <td>{(() => {
+                            const hrs = lapRows.map(l => l.avgHr).filter((h): h is number => typeof h === "number");
+                            return hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : "-";
+                          })()}</td>
+                          <td>{(() => {
+                            const hrs = lapRows.map(l => l.maxHr).filter((h): h is number => typeof h === "number");
+                            return hrs.length > 0 ? Math.round(Math.max(...hrs)) : "-";
+                          })()}</td>
+                          <td>{(() => {
+                            const asc = lapRows.reduce((a, b) => a + (b.ascentMeters || 0), 0);
+                            return asc > 0 ? `${Math.round(convertElevationMeters(asc, distanceUnit))} ${elevationLabel(distanceUnit)}` : "-";
+                          })()}</td>
+                          <td>{(() => {
+                            const desc = lapRows.reduce((a, b) => a + (b.descentMeters || 0), 0);
+                            return desc > 0 ? `${Math.round(convertElevationMeters(desc, distanceUnit))} ${elevationLabel(distanceUnit)}` : "-";
+                          })()}</td>
+                          <td>{(() => {
+                            const cads = lapRows.map(l => l.avgCadence).filter((c): c is number => typeof c === "number");
+                            return cads.length > 0 ? Math.round(cads.reduce((a, b) => a + b, 0) / cads.length) : "-";
+                          })()}</td>
+                          <td>{(() => {
+                            const cal = lapRows.reduce((a, b) => a + (b.calories || 0), 0);
+                            return cal > 0 ? Math.round(cal) : "-";
+                          })()}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="empty-state">

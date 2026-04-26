@@ -3,6 +3,7 @@ import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { RecordPoint } from "../types";
 import type { MapStyle } from "../stores/settingsStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { convertElevationMeters, convertSpeedKmh, elevationLabel, speedLabel } from "../lib/units";
 
 type Props = {
   records: RecordPoint[];
@@ -12,7 +13,20 @@ type Props = {
 };
 
 type PathColorMode = "solid" | "speed" | "heart_rate" | "cadence" | "altitude" | "power" | "temperature" | "time";
-const PLAYBACK_SPEEDS = [1, 2, 4, 8] as const;
+const PLAYBACK_SPEEDS = [1, 2, 4, 8, 16, 32] as const;
+
+const IconPlay = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="6 3 20 12 6 21 6 3" />
+  </svg>
+);
+
+const IconPause = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="6" y="4" width="4" height="16" />
+    <rect x="14" y="4" width="4" height="16" />
+  </svg>
+);
 
 const PATH_COLOR_OPTIONS: { value: PathColorMode; label: string }[] = [
   { value: "solid", label: "Solid" },
@@ -275,14 +289,14 @@ function buildTooltipHtml(props: Record<string, any>, distanceUnit: "km" | "mi")
 
   const rows: string[] = [];
   if (speed !== null && speed > 0) {
-    const speedValue = distanceUnit === "mi" ? speed / 1.609344 : speed;
-    const speedUnit = distanceUnit === "mi" ? "mi/h" : "km/h";
+    const speedValue = convertSpeedKmh(speed, distanceUnit);
+    const speedUnit = speedLabel(distanceUnit);
     rows.push(row("speed", "Speed", `${fmt2(speedValue)} ${speedUnit}`));
   }
   if (heartRate !== null && heartRate > 0)
     rows.push(row("heart", "Heart", `${fmt2(heartRate)} bpm`));
-  if (altitude !== null && altitude > 0)
-    rows.push(row("elevation", "Elevation", `${fmt2(altitude)} m`));
+  if (altitude !== null)
+    rows.push(row("elevation", "Elevation", `${fmt2(convertElevationMeters(altitude, distanceUnit))} ${elevationLabel(distanceUnit)}`));
   if (cadence !== null && cadence > 0)
     rows.push(row("cadence", "Cadence", `${fmt2(cadence)} rpm`));
   if (power !== null && power > 0)
@@ -297,6 +311,17 @@ function buildTooltipHtml(props: Record<string, any>, distanceUnit: "km" | "mi")
 function formatMetric(value: number | null | undefined, digits = 1): string {
   if (!Number.isFinite(value)) return "--";
   return Number(value).toFixed(digits).replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+}
+
+function sampleRouteRecords(records: RecordPoint[], maxPoints: number): RecordPoint[] {
+  if (records.length <= maxPoints) return records;
+  const sampled: RecordPoint[] = [];
+  const lastIndex = records.length - 1;
+  for (let i = 0; i < maxPoints; i += 1) {
+    const index = Math.round((i / (maxPoints - 1)) * lastIndex);
+    sampled.push(records[index]);
+  }
+  return sampled;
 }
 
 /* ── Component ───────────────────────────────────────────────────── */
@@ -361,7 +386,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
 
   const [pathColorMode, setPathColorMode] = useState<PathColorMode>("heart_rate");
   const [terrainEnabled, setTerrainEnabled] = useState(false);
-  const [telemetryEnabled, setTelemetryEnabled] = useState(false);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(true);
   const [timelineIndex, setTimelineIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeedIndex, setPlaybackSpeedIndex] = useState(0);
@@ -374,12 +399,10 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
   const playheadFloatRef = useRef(0);
   const playheadElapsedMsRef = useRef(0);
 
-  const gpsRecords = useMemo(
-    () => records
-      .filter((r) => typeof r.latitude === "number" && typeof r.longitude === "number")
-      .slice(0, 6000),
-    [records]
-  );
+  const gpsRecords = useMemo(() => {
+    const rows = records.filter((r) => typeof r.latitude === "number" && typeof r.longitude === "number");
+    return sampleRouteRecords(rows, 6000);
+  }, [records]);
 
   const coordinates = useMemo(
     () => gpsRecords.map((r) => [r.longitude as number, r.latitude as number]),
@@ -413,13 +436,13 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
   const telemetryData = useMemo(() => {
     if (!currentPoint) return null;
     const speedKmh = (currentPoint.speed_m_s ?? 0) * 3.6;
-    const speedValue = distanceUnit === "mi" ? speedKmh / 1.609344 : speedKmh;
-    const speedUnit = distanceUnit === "mi" ? "mi/h" : "km/h";
+    const speedValue = convertSpeedKmh(speedKmh, distanceUnit);
+    const speedUnit = speedLabel(distanceUnit);
     return {
       time: formatElapsed(currentElapsedSeconds),
       speed: `${formatMetric(speedValue, 2)} ${speedUnit}`,
       heartRate: currentPoint.heart_rate ? `${formatMetric(currentPoint.heart_rate, 0)} bpm` : "--",
-      altitude: currentPoint.altitude_m ? `${formatMetric(currentPoint.altitude_m, 0)} m` : "--",
+      altitude: currentPoint.altitude_m != null ? `${formatMetric(convertElevationMeters(currentPoint.altitude_m, distanceUnit), 0)} ${elevationLabel(distanceUnit)}` : "--",
       cadence: currentPoint.cadence ? `${formatMetric(currentPoint.cadence, 0)} rpm` : "--",
       power: currentPoint.power ? `${formatMetric(currentPoint.power, 0)} W` : "--",
       temp: Number.isFinite(currentPoint.temperature_c) ? `${formatMetric(currentPoint.temperature_c, 1)} C` : "--",
@@ -663,6 +686,36 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
       });
     }
 
+    if (!map.getLayer(LAP_LAYER_ID)) {
+      map.addLayer({
+        id: LAP_LAYER_ID,
+        type: "circle",
+        source: LAP_SOURCE_ID,
+        paint: {
+          "circle-radius": 7,
+          "circle-color": "#4f46e5",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5
+        }
+      });
+    }
+
+    if (!map.getLayer(LAP_LABEL_LAYER_ID)) {
+      map.addLayer({
+        id: LAP_LABEL_LAYER_ID,
+        type: "symbol",
+        source: LAP_SOURCE_ID,
+        layout: {
+          "text-field": ["get", "label"] as any,
+          "text-size": 10,
+          "text-font": ["Open Sans Bold"]
+        },
+        paint: {
+          "text-color": "#ffffff"
+        }
+      });
+    }
+
     if (!map.getLayer(MARKER_LAYER_ID)) {
       map.addLayer({
         id: MARKER_LAYER_ID,
@@ -685,36 +738,6 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
         layout: {
           "text-field": ["get", "label"] as any,
           "text-size": 9,
-          "text-font": ["Open Sans Bold"]
-        },
-        paint: {
-          "text-color": "#ffffff"
-        }
-      });
-    }
-
-    if (!map.getLayer(LAP_LAYER_ID)) {
-      map.addLayer({
-        id: LAP_LAYER_ID,
-        type: "circle",
-        source: LAP_SOURCE_ID,
-        paint: {
-          "circle-radius": 7,
-          "circle-color": "#0ea5e9",
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5
-        }
-      });
-    }
-
-    if (!map.getLayer(LAP_LABEL_LAYER_ID)) {
-      map.addLayer({
-        id: LAP_LABEL_LAYER_ID,
-        type: "symbol",
-        source: LAP_SOURCE_ID,
-        layout: {
-          "text-field": ["get", "label"] as any,
-          "text-size": 10,
           "text-font": ["Open Sans Bold"]
         },
         paint: {
@@ -948,8 +971,8 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
       </div>
 
       <div className="map-playback-bar">
-        <button className="btn-outline-secondary map-playback-btn" onClick={togglePlayback} disabled={coordinates.length < 2}>
-          {isPlaying ? "Pause" : "Play"}
+        <button className="btn-outline-secondary map-playback-btn" onClick={togglePlayback} disabled={coordinates.length < 2} style={{ padding: "0.32rem 0.6rem", display: "flex", alignItems: "center", justifyContent: "center" }} aria-label={isPlaying ? "Pause" : "Play"}>
+          {isPlaying ? <IconPause /> : <IconPlay />}
         </button>
         <input
           className="map-playback-range"
@@ -964,6 +987,11 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
             setIsPlaying(false);
             setTimelineIndex(next);
           }}
+          style={{
+            "--progress": coordinates.length > 1 
+                ? `${(Math.min(timelineIndex, Math.max(0, coordinates.length - 1)) / Math.max(1, coordinates.length - 1)) * 100}%` 
+                : "0%"
+          } as React.CSSProperties}
         />
         <button
           className="btn-outline-secondary map-playback-speed"

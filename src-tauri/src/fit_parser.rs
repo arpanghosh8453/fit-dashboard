@@ -307,7 +307,9 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut session_avg_cadence: Option<i64> = None;
     let mut session_total_elapsed_time_s: Option<f64> = None;
     let mut session_total_distance_m: Option<f64> = None;
+    let mut session_total_calories: Option<i64> = None;
     let mut lap_ranges: Vec<serde_json::Value> = Vec::new();
+    let mut heart_rate_zone_bounds_bpm: Vec<i64> = Vec::new();
 
     let mut min_ts: Option<i64> = None;
     let mut max_ts: Option<i64> = None;
@@ -387,6 +389,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "avg_cadence" => session_avg_cadence = value_i64(field.value()),
                     "total_elapsed_time" => session_total_elapsed_time_s = value_f64(field.value()),
                     "total_distance" => session_total_distance_m = value_f64(field.value()),
+                    "total_calories" => session_total_calories = value_i64(field.value()),
                     _ => {}
                 }
             }
@@ -491,10 +494,51 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         } else if rec.kind() == MesgNum::Lap {
             let mut lap_start_ms: Option<i64> = None;
             let mut lap_end_ms: Option<i64> = None;
+            let mut lap_total_elapsed_time_s: Option<f64> = None;
+            let mut lap_total_timer_time_s: Option<f64> = None;
+            let mut lap_total_distance_m: Option<f64> = None;
+            let mut lap_avg_speed_m_s: Option<f64> = None;
+            let mut lap_max_speed_m_s: Option<f64> = None;
+            let mut lap_avg_heart_rate: Option<i64> = None;
+            let mut lap_max_heart_rate: Option<i64> = None;
+            let mut lap_total_ascent_m: Option<f64> = None;
+            let mut lap_total_descent_m: Option<f64> = None;
+            let mut lap_avg_cadence: Option<i64> = None;
+            let mut lap_max_cadence: Option<i64> = None;
+            let mut lap_total_calories: Option<i64> = None;
+            let mut lap_best_speed_m_s: Option<f64> = None;
             for field in rec.fields() {
                 match field.name() {
                     "start_time" => lap_start_ms = value_timestamp_ms(field.value()),
                     "timestamp" => lap_end_ms = value_timestamp_ms(field.value()),
+                    "total_elapsed_time" => lap_total_elapsed_time_s = value_f64(field.value()),
+                    "total_timer_time" => lap_total_timer_time_s = value_f64(field.value()),
+                    "total_distance" => lap_total_distance_m = value_f64(field.value()),
+                    "enhanced_avg_speed" => lap_avg_speed_m_s = value_f64(field.value()),
+                    "avg_speed" => {
+                        if lap_avg_speed_m_s.is_none() {
+                            lap_avg_speed_m_s = value_f64(field.value());
+                        }
+                    }
+                    "enhanced_max_speed" => lap_max_speed_m_s = value_f64(field.value()),
+                    "max_speed" => {
+                        if lap_max_speed_m_s.is_none() {
+                            lap_max_speed_m_s = value_f64(field.value());
+                        }
+                    }
+                    "enhanced_best_speed" => lap_best_speed_m_s = value_f64(field.value()),
+                    "best_speed" => {
+                        if lap_best_speed_m_s.is_none() {
+                            lap_best_speed_m_s = value_f64(field.value());
+                        }
+                    }
+                    "avg_heart_rate" => lap_avg_heart_rate = value_i64(field.value()),
+                    "max_heart_rate" => lap_max_heart_rate = value_i64(field.value()),
+                    "total_ascent" => lap_total_ascent_m = value_f64(field.value()),
+                    "total_descent" => lap_total_descent_m = value_f64(field.value()),
+                    "avg_cadence" => lap_avg_cadence = value_i64(field.value()),
+                    "max_cadence" => lap_max_cadence = value_i64(field.value()),
+                    "total_calories" => lap_total_calories = value_i64(field.value()),
                     _ => {}
                 }
             }
@@ -505,10 +549,43 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     .map(|dt| dt.to_rfc3339()),
                 "end_ts_utc": lap_end_ms
                     .and_then(chrono::DateTime::from_timestamp_millis)
-                    .map(|dt| dt.to_rfc3339())
+                    .map(|dt| dt.to_rfc3339()),
+                "total_elapsed_time_s": lap_total_elapsed_time_s,
+                "total_timer_time_s": lap_total_timer_time_s,
+                "total_distance_m": lap_total_distance_m,
+                "avg_speed_m_s": lap_avg_speed_m_s,
+                "max_speed_m_s": lap_max_speed_m_s,
+                "avg_heart_rate": lap_avg_heart_rate,
+                "max_heart_rate": lap_max_heart_rate,
+                "total_ascent_m": lap_total_ascent_m,
+                "total_descent_m": lap_total_descent_m,
+                "avg_cadence": lap_avg_cadence,
+                "max_cadence": lap_max_cadence,
+                "total_calories": lap_total_calories,
+                "best_speed_m_s": lap_best_speed_m_s
             }));
         }
+
+        let rec_kind_name = format!("{:?}", rec.kind()).to_lowercase();
+        if rec_kind_name.contains("zone") {
+            for field in rec.fields() {
+                let field_name = field.name().to_lowercase();
+                let is_heart_rate_zone_field =
+                    field_name.contains("zone")
+                        && (field_name.contains("heart") || field_name.starts_with("hr_"));
+                if !is_heart_rate_zone_field {
+                    continue;
+                }
+
+                if let Some(value) = value_i64(field.value()).filter(|v| *v >= 40 && *v <= 260) {
+                    heart_rate_zone_bounds_bpm.push(value);
+                }
+            }
+        }
     }
+
+    heart_rate_zone_bounds_bpm.sort_unstable();
+    heart_rate_zone_bounds_bpm.dedup();
 
     if file_id_type_name.is_some() || file_id_type_code.is_some() {
         let type_name = file_id_type_name
@@ -574,6 +651,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         "activity_metrics": {
             "vo2_max": vo2_max
         },
+        "heart_rate_zone_bounds_bpm": heart_rate_zone_bounds_bpm,
         "session": {
             "beginning_body_battery": session_beginning_body_battery,
             "ending_body_battery": session_ending_body_battery,
@@ -582,7 +660,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             "max_cadence": session_max_cadence,
             "avg_cadence": session_avg_cadence,
             "total_elapsed_time_s": session_total_elapsed_time_s,
-            "total_distance_m": session_total_distance_m
+            "total_distance_m": session_total_distance_m,
+            "total_calories": session_total_calories
         },
         "laps": lap_ranges
     })
