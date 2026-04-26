@@ -1,12 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "FIT Dashboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.local.fitdashboard",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "features": ["tauri-app"],
+    "features": [
+      "tauri-app"
+    ],
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173"
   },
