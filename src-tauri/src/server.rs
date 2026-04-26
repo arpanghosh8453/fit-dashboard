@@ -584,6 +584,21 @@ async fn list_sync_files(
     {
         let path = entry.path();
         if is_supported_activity_file(&path) {
+            let bytes = match tokio::fs::read(&path).await {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            let hash = sha256_hex(&bytes);
+
+            if let Ok(true) = state.db.is_hash_blacklisted(&hash) {
+                continue;
+            }
+            if let Ok(true) = state.db.is_file_imported(&hash) {
+                continue;
+            }
             files.push(path.to_string_lossy().to_string());
         }
     }

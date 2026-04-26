@@ -964,7 +964,8 @@ export function Dashboard({ onLogout }: Props) {
     const failedReasons: string[] = [];
     try {
       for (let i = 0; i < filtered.length; i++) {
-        setBulkDeleteProgress({ done: i, total });
+        flushSync(() => { setBulkDeleteProgress({ done: i, total }); });
+        await waitForUiPaint();
         try {
           await api.deleteActivity(filtered[i].id);
         } catch (err) {
@@ -973,7 +974,8 @@ export function Dashboard({ onLogout }: Props) {
           console.error(`Failed to delete activity ${filtered[i].id}:`, err);
         }
       }
-      setBulkDeleteProgress({ done: total, total });
+      flushSync(() => { setBulkDeleteProgress({ done: total, total }); });
+      await waitForUiPaint();
       if (selectedActivity && filtered.some((a) => a.id === selectedActivity.id)) {
         await selectActivity(null);
       }
