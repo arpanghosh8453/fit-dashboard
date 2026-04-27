@@ -408,3 +408,7 @@ FIT Dashboard is a personal open-source project maintained in public. I started 
 ## License
 
 Copyright &copy; 2025 Arpan Ghosh. Licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=arpanghosh8453/fit-dashboard&type=date&legend=top-left)](https://www.star-history.com/#arpanghosh8453/fit-dashboard&type=date&legend=top-left)
