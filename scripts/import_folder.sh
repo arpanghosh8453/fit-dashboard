@@ -16,7 +16,6 @@ SESSION=$(curl --silent -X POST $BASE_URL/api/unlock -H 'Content-Type: applicati
 # import FIT files from folder
 for i in $FIT_FOLDER/*
 do
-  echo $i
   STATUS=$(curl --silent "$BASE_URL/api/import-fit" -H "X-Session: $SESSION" -F "file=@$i" --insecure)
   if echo "$STATUS" | jq -e 'has("error")' > /dev/null; then
     echo $i $STATUS
