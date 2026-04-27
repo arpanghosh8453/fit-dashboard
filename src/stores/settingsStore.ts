@@ -11,6 +11,7 @@ type SettingsState = {
   distanceUnit: DistanceUnit;
   timeFormat: TimeFormat;
   mapStyle: MapStyle;
+  overviewTableDays: number;
   supporterBadge: boolean;
   donationDismissed: boolean;
   showSettings: boolean;
@@ -20,6 +21,7 @@ type SettingsState = {
   setDistanceUnit: (unit: DistanceUnit) => void;
   setTimeFormat: (format: TimeFormat) => void;
   setMapStyle: (style: MapStyle) => void;
+  setOverviewTableDays: (days: number) => void;
   loadSupporterStatus: () => Promise<void>;
   verifySupporterCode: (code: string) => Promise<boolean>;
   removeSupporterBadge: () => Promise<void>;
@@ -33,6 +35,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   distanceUnit: "km",
   timeFormat: "24h",
   mapStyle: "default",
+  overviewTableDays: 7,
   supporterBadge: false,
   donationDismissed: false,
   showSettings: false,
@@ -47,6 +50,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         distanceUnit: parsed.distanceUnit ?? "km",
         timeFormat: parsed.timeFormat ?? "24h",
         mapStyle: parsed.mapStyle ?? "default",
+        overviewTableDays: Number.isFinite(parsed.overviewTableDays) ? Math.max(1, Math.round(parsed.overviewTableDays)) : 7,
       });
     } catch {
       // Ignore invalid persisted data.
@@ -73,6 +77,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setMapStyle: (mapStyle) => {
     set({ mapStyle });
     persist({ ...get(), mapStyle });
+  },
+
+  setOverviewTableDays: (overviewTableDays) => {
+    const clampedDays = Math.max(1, Math.round(overviewTableDays));
+    set({ overviewTableDays: clampedDays });
+    persist({ ...get(), overviewTableDays: clampedDays });
   },
 
   loadSupporterStatus: async () => {
@@ -128,6 +138,7 @@ function persist(state: SettingsState) {
       distanceUnit: state.distanceUnit,
       timeFormat: state.timeFormat,
       mapStyle: state.mapStyle,
+      overviewTableDays: state.overviewTableDays,
     })
   );
 }

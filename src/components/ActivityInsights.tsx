@@ -1,12 +1,21 @@
 import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
-import { HEART_RATE_ZONES, resolveHeartRateZoneIndex } from "../lib/hrZones";
+import { buildHeartRateZones, resolveHeartRateZoneIndex } from "../lib/hrZones";
 import { applyRollingAverageSeries, getDynamicSmoothingWindow } from "../lib/chartSmoothing";
+import {
+  convertElevationMeters,
+  convertSpeedMps,
+  elevationLabel,
+  speedLabel,
+  type DistanceUnit,
+} from "../lib/units";
 
 type Props = {
   records: RecordPoint[];
   theme: "light" | "dark";
+  distanceUnit: DistanceUnit;
+  heartRateZoneBoundsBpm?: number[];
   zoomRange?: { start: number; end: number } | null;
   onZoomChange?: (range: { start: number; end: number }) => void;
   lapTimestampsUtc?: string[];
@@ -38,7 +47,17 @@ function formatAbsTime(baseTimestampMs: number, relMs: number): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapTimestampsUtc = [], smoothGraphs = true }: Props) {
+export function ActivityInsights({
+  records,
+  theme,
+  distanceUnit,
+  heartRateZoneBoundsBpm,
+  zoomRange,
+  onZoomChange,
+  lapTimestampsUtc = [],
+  smoothGraphs = true,
+}: Props) {
+    const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
@@ -74,13 +93,13 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         ? Math.max(0, (r.distance_m - prev.distance_m) / dt)
         : undefined;
     const speedMs = r.speed_m_s ?? derivedSpeed;
-    const speedKmh = typeof speedMs === "number" ? speedMs * 3.6 : null;
-    const paceMinPerKm = speedKmh && speedKmh > 0 ? 60 / speedKmh : null;
+    const speedInUnit = typeof speedMs === "number" ? convertSpeedMps(speedMs, distanceUnit) : null;
+    const paceMinPerUnit = speedInUnit && speedInUnit > 0 ? 60 / speedInUnit : null;
     return {
       relMs: r.timestamp_ms - t0,
-      speedKmh,
-      altitudeM: r.altitude_m ?? null,
-      paceMinPerKm,
+      speedInUnit,
+      altitudeInUnit: typeof r.altitude_m === "number" ? convertElevationMeters(r.altitude_m, distanceUnit) : null,
+      paceMinPerUnit,
       heartRate: r.heart_rate ?? null,
       power: r.power ?? null,
       cadence: r.cadence ?? null,
@@ -89,8 +108,8 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
     };
   });
 
-  const speedLineData = timeline.map((d) => [d.relMs, d.speedKmh]);
-  const elevationLineData = timeline.map((d) => [d.relMs, d.altitudeM]);
+  const speedLineData = timeline.map((d) => [d.relMs, d.speedInUnit]);
+  const elevationLineData = timeline.map((d) => [d.relMs, d.altitudeInUnit]);
   const cadenceLineData = timeline.map((d) => [d.relMs, d.cadence]);
   const powerLineData = timeline.map((d) => [d.relMs, d.power]);
 
@@ -116,13 +135,13 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
   const hrValues = records
     .map((r) => r.heart_rate)
     .filter((n): n is number => typeof n === "number" && n > 0);
-  const zoneMinutes = HEART_RATE_ZONES.map(() => 0);
+  const zoneMinutes = hrZones.map(() => 0);
   if (hrValues.length > 0) {
     for (let i = 0; i < records.length - 1; i += 1) {
       const hr = records[i].heart_rate;
       if (typeof hr !== "number" || hr <= 0) continue;
       const dtMin = Math.max(0, (records[i + 1].timestamp_ms - records[i].timestamp_ms) / 60000);
-      const zoneIndex = resolveHeartRateZoneIndex(hr);
+      const zoneIndex = resolveHeartRateZoneIndex(hr, hrZones);
       zoneMinutes[zoneIndex] += dtMin;
     }
   }
@@ -152,7 +171,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
       splitLine: { show: false },
     },
     yAxis: {
-      type: "value", name: "km/h",
+      type: "value", name: speedLabel(distanceUnit),
       nameTextStyle: { color: axisColor, fontSize: 11 },
       axisLabel: { color: axisColor, fontSize: 11 },
       splitLine: { lineStyle: { color: gridLine } },
@@ -174,6 +193,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         sampling: smoothGraphs ? "lttb" : undefined,
         data: speedLineDataSmoothed,
         markLine: lapMarkers.length ? {
+          animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
           label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
@@ -191,7 +211,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         const p = params?.[0];
         const rel = Number(p?.value?.[0] ?? 0);
         const val = p?.value?.[1];
-        return `${formatTooltipHeader(rel)}<div>${p?.marker ?? ""} Elevation: <strong>${val == null ? "--" : Number(val).toFixed(2)} m</strong></div>`;
+        return `${formatTooltipHeader(rel)}<div>${p?.marker ?? ""} Elevation: <strong>${val == null ? "--" : Number(val).toFixed(2)} ${elevationLabel(distanceUnit)}</strong></div>`;
       }
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
@@ -203,7 +223,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
       splitLine: { show: false },
     },
     yAxis: {
-      type: "value", name: "m",
+      type: "value", name: elevationLabel(distanceUnit),
       nameTextStyle: { color: axisColor, fontSize: 11 },
       axisLabel: { color: axisColor, fontSize: 11 },
       splitLine: { lineStyle: { color: gridLine } },
@@ -224,6 +244,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         sampling: smoothGraphs ? "lttb" : undefined,
         data: elevationLineDataSmoothed,
         markLine: lapMarkers.length ? {
+          animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
           label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
@@ -251,7 +272,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
           borderWidth: 3,
         },
         label: { color: axisColor, fontSize: 12, formatter: (p: any) => `${p.name}\n${Number(p.value).toFixed(1)} min` },
-        data: HEART_RATE_ZONES.map((zone, idx) => ({
+        data: hrZones.map((zone, idx) => ({
           name: zone.name,
           value: zoneMinutes[idx],
           itemStyle: { color: zone.color },
@@ -315,6 +336,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         sampling: smoothGraphs ? "lttb" : undefined,
         data: cadenceLineDataSmoothed,
         markLine: lapMarkers.length ? {
+          animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
           label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
@@ -427,7 +449,7 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
         itemStyle: { borderRadius: [2, 2, 0, 0] },
         data: hrHistogram.counts.map((count, idx) => {
           const centerHr = hrHistogram.centers[idx] ?? 0;
-          const zone = HEART_RATE_ZONES[resolveHeartRateZoneIndex(centerHr)];
+          const zone = hrZones[resolveHeartRateZoneIndex(centerHr, hrZones)];
           return {
             value: count,
             itemStyle: { color: zone.color },
@@ -448,8 +470,8 @@ export function ActivityInsights({ records, theme, zoomRange, onZoomChange, lapT
     },
     {
       label: "Speed",
-      unit: "km/h",
-      getter: (d: (typeof timeline)[number]) => d.speedKmh,
+      unit: speedLabel(distanceUnit),
+      getter: (d: (typeof timeline)[number]) => d.speedInUnit,
       colors: isDark ? ["#0e2a1e", "#16a34a", "#4ade80"] : ["#dcfce7", "#4ade80", "#15803d"],
     },
     {

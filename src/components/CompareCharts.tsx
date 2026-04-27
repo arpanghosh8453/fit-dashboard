@@ -3,11 +3,13 @@ import type { Activity, RecordPoint } from "../types";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
+import { convertElevationMeters, convertSpeedMps, elevationLabel, speedLabel, type DistanceUnit } from "../lib/units";
 
 type Props = {
   compareIds: number[];
   activities: Activity[];
   theme: "light" | "dark";
+  distanceUnit: DistanceUnit;
 };
 
 // Format MM:SS or HH:MM:SS
@@ -37,7 +39,7 @@ const formatLegendDateTime = (rawUtc: string) => {
   });
 };
 
-export function CompareCharts({ compareIds, activities, theme }: Props) {
+export function CompareCharts({ compareIds, activities, theme, distanceUnit }: Props) {
   const [loading, setLoading] = useState(false);
   const [dataSets, setDataSets] = useState<{ name: string; records: RecordPoint[] }[]>([]);
   const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
@@ -89,7 +91,7 @@ export function CompareCharts({ compareIds, activities, theme }: Props) {
   const tooltipBorder = isDark ? "rgba(100, 140, 220, 0.2)" : "rgba(0, 0, 0, 0.08)";
   const tooltipText = isDark ? "#e2e8f4" : "#0f172a";
 
-  const buildSeries = (key: keyof RecordPoint, seriesName: string) => {
+  const buildSeries = (key: keyof RecordPoint) => {
     return dataSets.map((ds) => {
       const t0 = ds.records[0]?.timestamp_ms ?? 0;
       return {
@@ -98,7 +100,13 @@ export function CompareCharts({ compareIds, activities, theme }: Props) {
         smooth: true,
         showSymbol: false,
         lineStyle: { width: 2 },
-        data: ds.records.map(r => [r.timestamp_ms - t0, r[key] ?? null]),
+        data: ds.records.map((r) => {
+          const raw = r[key] ?? null;
+          if (raw == null) return [r.timestamp_ms - t0, null];
+          if (key === "speed_m_s") return [r.timestamp_ms - t0, convertSpeedMps(raw as number, distanceUnit)];
+          if (key === "altitude_m") return [r.timestamp_ms - t0, convertElevationMeters(raw as number, distanceUnit)];
+          return [r.timestamp_ms - t0, raw];
+        }),
       };
     });
   };
@@ -161,7 +169,7 @@ export function CompareCharts({ compareIds, activities, theme }: Props) {
         end: zoomRange?.end ?? 100,
       },
     ],
-    series: buildSeries(key, title),
+    series: buildSeries(key),
   });
 
   const zoomEvents = {
@@ -183,9 +191,9 @@ export function CompareCharts({ compareIds, activities, theme }: Props) {
         </button>
       </div>
       <div className="panel"><ReactECharts option={createOption("Heart Rate", "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Speed", "m/s", "speed_m_s")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Speed", speedLabel(distanceUnit), "speed_m_s")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
       <div className="panel"><ReactECharts option={createOption("Power", "W", "power")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Altitude", "m", "altitude_m")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption("Altitude", elevationLabel(distanceUnit), "altitude_m")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
     </div>
   );
 }

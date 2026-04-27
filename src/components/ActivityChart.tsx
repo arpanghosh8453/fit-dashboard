@@ -1,19 +1,31 @@
 import ReactECharts from "echarts-for-react";
 import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
-import { HEART_RATE_ZONES } from "../lib/hrZones";
+import { buildHeartRateZones } from "../lib/hrZones";
 import { applyRollingAverageSeries, getDynamicSmoothingWindow } from "../lib/chartSmoothing";
+import { convertDistanceMeters, convertPaceMinPerKm, distanceLabel, paceLabel, type DistanceUnit } from "../lib/units";
 
 type Props = {
   records: RecordPoint[];
   theme: "light" | "dark";
+  distanceUnit: DistanceUnit;
+  heartRateZoneBoundsBpm?: number[];
   zoomRange?: { start: number; end: number } | null;
   onZoomChange?: (range: { start: number; end: number }) => void;
   lapTimestampsUtc?: string[];
   smoothGraphs?: boolean;
 };
 
-export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTimestampsUtc = [], smoothGraphs = true }: Props) {
+export function ActivityChart({
+  records,
+  theme,
+  distanceUnit,
+  heartRateZoneBoundsBpm,
+  zoomRange,
+  onZoomChange,
+  lapTimestampsUtc = [],
+  smoothGraphs = true,
+}: Props) {
   const t0 = records[0]?.timestamp_ms ?? 0;
   const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
   const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
@@ -41,6 +53,7 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
   const formatTooltipHeader = (relMs: number) =>
     `<div style="display:flex;align-items:center;gap:6px;"><strong>${formatRelTime(relMs)}</strong><span style="display:inline-flex;align-items:center;border-radius:999px;padding:1px 6px;font-size:11px;background:rgba(148,163,184,0.22);">${formatAbsTime(relMs)}</span></div>`;
 
+  const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
   const hrSeriesData = records.map((r) => [r.timestamp_ms - t0, r.heart_rate ?? null, r.timestamp_ms, typeof r.distance_m === "number" ? r.distance_m / 1000 : null]);
   const paceSeriesData = records.map((r, i) => {
     const relMs = r.timestamp_ms - t0;
@@ -52,7 +65,8 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
         : undefined;
     const speedMs = r.speed_m_s ?? derivedSpeed;
     const paceMinPerKm = speedMs && speedMs > 0 ? 1000 / (speedMs * 60) : null;
-    return [relMs, paceMinPerKm, r.timestamp_ms];
+    const paceMinPerUnit = paceMinPerKm == null ? null : convertPaceMinPerKm(paceMinPerKm, distanceUnit);
+    return [relMs, paceMinPerUnit, r.timestamp_ms];
   });
 
   const hrSeriesSmoothed = smoothGraphs ? applyRollingAverageSeries(hrSeriesData, 1, smoothWindow) : hrSeriesData;
@@ -91,9 +105,10 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
             html += `<div>${s.marker} ${s.seriesName}: <strong>${s.value[1]}</strong></div>`;
           }
         }
-        const distanceKm = p?.value?.[3];
+        const distanceKm = p?.value?.[3] as number | null | undefined;
         if (distanceKm !== null && distanceKm !== undefined) {
-          html += `<div style="margin-top:2px;">Distance: <strong>${Number(distanceKm).toFixed(2)} km</strong></div>`;
+          const distanceInUnit = convertDistanceMeters(Number(distanceKm) * 1000, distanceUnit);
+          html += `<div style="margin-top:2px;">Distance: <strong>${distanceInUnit.toFixed(2)} ${distanceLabel(distanceUnit)}</strong></div>`;
         }
         return html;
       }
@@ -107,7 +122,7 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
       show: false,
       seriesIndex: 0,
       dimension: 1,
-      pieces: HEART_RATE_ZONES.map((zone) => {
+      pieces: hrZones.map((zone) => {
         if (zone.maxInclusive === null) {
           return { gt: zone.minExclusive, color: zone.color };
         }
@@ -156,6 +171,7 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
         sampling: smoothGraphs ? "lttb" : undefined,
         data: hrSeriesSmoothed,
         markLine: lapMarkers.length ? {
+          animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
           label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
@@ -180,7 +196,7 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
             const pace = Number(s.value[1]);
             const min = Math.floor(pace);
             const sec = Math.floor((pace - min) * 60);
-            html += `<div>${s.marker} ${s.seriesName}: <strong>${min}:${String(sec).padStart(2, "0")} min/km</strong></div>`;
+            html += `<div>${s.marker} ${s.seriesName}: <strong>${min}:${String(sec).padStart(2, "0")} ${paceLabel(distanceUnit)}</strong></div>`;
           }
         }
         return html;
@@ -204,7 +220,7 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
     },
     yAxis: {
       type: "value",
-      name: "min/km",
+      name: paceLabel(distanceUnit),
       inverse: true,
       nameTextStyle: { color: axisColor, fontSize: 11 },
       axisLabel: { color: axisColor, fontSize: 11 },
@@ -230,6 +246,7 @@ export function ActivityChart({ records, theme, zoomRange, onZoomChange, lapTime
         sampling: smoothGraphs ? "lttb" : undefined,
         data: paceSeriesSmoothed,
         markLine: lapMarkers.length ? {
+          animation: false,
           symbol: ["none", "none"],
           lineStyle: { color: isDark ? "rgba(148,163,184,0.55)" : "rgba(71,85,105,0.5)", type: "dashed", width: 1 },
           label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },

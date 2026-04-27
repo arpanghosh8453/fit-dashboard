@@ -49,6 +49,7 @@ pub fn run(state: AppState) -> anyhow::Result<()> {
     tracing::info!("starting tauri app runtime");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(state)
         .setup(|app| {
             // Some Linux desktops ignore SVG bundle metadata for live window icons,
@@ -619,6 +620,21 @@ fn list_sync_files(state: State<'_, AppState>) -> Result<Vec<String>, String> {
         };
         let path = entry.path();
         if is_supported_activity_file(&path) {
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            let hash = sha256_hex(&bytes);
+
+            if let Ok(true) = state.db.is_hash_blacklisted(&hash) {
+                continue;
+            }
+            if let Ok(true) = state.db.is_file_imported(&hash) {
+                continue;
+            }
             files.push(path.to_string_lossy().to_string());
         }
     }
