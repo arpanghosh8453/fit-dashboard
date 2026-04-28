@@ -160,6 +160,7 @@ function computeRecordStats(records: RecordPoint[]) {
 }
 
 /* ── SVG Icons ───────────────────────────────────────────────────── */
+type Icon = "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "cadence" | "battery" | "avg" | "flame" | "vo2";
 
 const svgProps = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
@@ -263,6 +264,9 @@ function IconClipboard() {
 }
 function IconFlame() {
   return <svg width="18" height="18" viewBox="0 0 24 24" {...svgProps}><path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 002.5 2.5z" /></svg>;
+}
+function IconVo2() {
+  return <svg width="18" height="18" viewBox="0 0 24 24"><path fill="currentColor" d="M4.882 19q-1.203 0-2.042-.854Q2 17.293 2 16.073v-4.161q0-1.007.433-1.886q.433-.878 1.223-1.487l4.113-3.227q.427-.333.656-.813t.229-1.026V2h1v1.473q0 .546.238 1.026t.672.813l4.094 3.226q.784.61 1.217 1.488q.433.879.433 1.885v.32h-1v-.32q0-.763-.339-1.43t-.927-1.15L11.54 7.375v10.987q-.489-.373-.748-.951q-.258-.578-.252-1.338V6.608L9.154 5.48L7.75 6.608v9.465q.006 1.212-.83 2.07T4.882 19m.009-1q.784 0 1.325-.571t.534-1.356V7.375L4.266 9.331q-.608.483-.937 1.15Q3 11.149 3 11.911v4.162q0 .804.553 1.366q.553.561 1.338.561m8.801 1q-.31 0-.539-.23t-.23-.54v-3.845q0-.31.23-.54t.54-.23h2.346q.309 0 .539.23t.23.54v3.846q0 .31-.23.54q-.23.229-.54.229zm.116-.885h2.115V14.5h-2.115zM18.192 21v-2.366q0-.326.222-.548q.22-.22.548-.22h2.269V16.5h-3.039v-.885h3.154q.327 0 .548.222q.222.22.222.548v1.596q0 .327-.222.548q-.221.221-.548.221h-2.269v1.366h3.038V21zm-4.769-8.315"/></svg>
 }
 
 /* ── Dashboard Component ─────────────────────────────────────────── */
@@ -1020,10 +1024,10 @@ export function Dashboard({ onLogout }: Props) {
     ? String(selectedMetadata.file_id.serial_number)
     : "";
   const detailStats = useMemo(() => {
-    if (!selectedActivity) return [] as Array<{ key: string; label: string; value: string; secondary?: string; icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "cadence" | "battery" | "avg" | "flame" }>;
-    const out: Array<{ key: string; label: string; value: string; secondary?: string; icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "cadence" | "battery" | "avg" | "flame" }> = [];
+    if (!selectedActivity) return [] as Array<{ key: string; label: string; value: string; secondary?: string; icon: Icon }>;
+    const out: Array<{ key: string; label: string; value: string; secondary?: string; icon: Icon }> = [];
     const seen = new Set<string>();
-    const push = (key: string, label: string, value: string | null | undefined, icon: "clock" | "distance" | "speed" | "heart" | "mountain" | "power" | "cadence" | "battery" | "avg" | "flame", secondary?: string) => {
+    const push = (key: string, label: string, value: string | null | undefined, icon: Icon, secondary?: string) => {
       if (!value || seen.has(key)) return;
       seen.add(key);
       out.push({ key, label, value, secondary, icon });
@@ -1062,7 +1066,7 @@ export function Dashboard({ onLogout }: Props) {
         `${session.beginning_body_battery} -> ${session.ending_body_battery}`
       );
     }
-    if (typeof metric.vo2_max === "number" && metric.vo2_max > 0) push("vo2_max", "VO2 Max", `${metric.vo2_max.toFixed(1)}`, "avg");
+    if (typeof metric.vo2_max === "number" && metric.vo2_max > 0) push("vo2_max", "VO2 Max", `${metric.vo2_max.toFixed(1)}`, "vo2");
     if (typeof session.total_calories === "number" && session.total_calories > 0) push("total_calories", "Calories", `${Math.round(session.total_calories)} kcal`, "flame");
     if (lapTimestampsUtc.length > 0) push("laps", "Laps", String(lapTimestampsUtc.length), "avg");
 
@@ -1585,6 +1589,7 @@ export function Dashboard({ onLogout }: Props) {
                         {s.icon === "battery" && <IconBattery />}
                         {s.icon === "avg" && <IconAvg />}
                         {s.icon === "flame" && <IconFlame />}
+                        {s.icon === "vo2" && <IconVo2 />}
                       </span>
                       <span className="mini-value">{s.value}</span>
                       <span className="mini-label">{s.label}</span>

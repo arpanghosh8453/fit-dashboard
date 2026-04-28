@@ -485,10 +485,12 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     _ => {}
                 }
             }
-        } else if rec.kind() == MesgNum::MaxMetData {
+        } else if rec.kind() == MesgNum::Value(140){
             for field in rec.fields() {
-                if field.name() == "vo2_max" {
-                    vo2_max = value_f64(field.value());
+                if field.name() == "unknown_field_7" {
+                    if let Some(v) = value_f64(field.value()) {
+                        vo2_max = Some(v * 3.5 / 65536.0);
+                    }
                 }
             }
         } else if rec.kind() == MesgNum::Lap {
