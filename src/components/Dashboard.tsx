@@ -29,6 +29,7 @@ import {
   elevationLabel,
   speedLabel,
 } from "../lib/units";
+import { useTranslation } from "../lib/i18n";
 
 type Props = { onLogout: () => Promise<void> };
 
@@ -335,6 +336,7 @@ export function Dashboard({ onLogout }: Props) {
     toggleSettings, setTheme, mapStyle, setMapStyle,
     loadSupporterStatus, theme,
   } = useSettingsStore();
+  const { t } = useTranslation();
 
   useEffect(() => {
     const close = () => { setContextMenu(null); setBulkExportDropdownOpen(false); setIsSortOpen(false); };
@@ -1033,11 +1035,11 @@ export function Dashboard({ onLogout }: Props) {
       out.push({ key, label, value, secondary, icon });
     };
 
-    push("duration", "Duration", formatDuration(selectedActivity.duration_s), "clock");
-    push("distance", "Distance", `${(selectedActivity.distance_m / distanceDivisorValue).toFixed(2)} ${distanceSuffix}`, "distance");
+    push("duration", t("detail.duration"), formatDuration(selectedActivity.duration_s), "clock");
+    push("distance", t("detail.distance"), `${(selectedActivity.distance_m / distanceDivisorValue).toFixed(2)} ${distanceSuffix}`, "distance");
 
-    if (recordStats.avgSpeed > 0) push("avg_speed", "Avg Speed", `${convertSpeedKmh(recordStats.avgSpeed, distanceUnit).toFixed(1)} ${speedLabel(distanceUnit)}`, "speed");
-    if (recordStats.maxSpeed > 0) push("max_speed", "Max Speed", `${convertSpeedKmh(recordStats.maxSpeed, distanceUnit).toFixed(1)} ${speedLabel(distanceUnit)}`, "speed");
+    if (recordStats.avgSpeed > 0) push("avg_speed", t("detail.avgSpeed"), `${convertSpeedKmh(recordStats.avgSpeed, distanceUnit).toFixed(1)} ${speedLabel(distanceUnit)}`, "speed");
+    if (recordStats.maxSpeed > 0) push("max_speed", t("detail.maxSpeed"), `${convertSpeedKmh(recordStats.maxSpeed, distanceUnit).toFixed(1)} ${speedLabel(distanceUnit)}`, "speed");
 
     const session = selectedMetadata?.session ?? {};
     const metric = selectedMetadata?.activity_metrics ?? {};
@@ -1047,14 +1049,14 @@ export function Dashboard({ onLogout }: Props) {
     const avgPaceText = formatPace(avgPaceSec, distanceSuffix);
     const avgHr = recordStats.avgHr > 0 ? Math.round(recordStats.avgHr) : (typeof session.avg_heart_rate === "number" ? session.avg_heart_rate : null);
     const maxHr = recordStats.maxHr > 0 ? recordStats.maxHr : (typeof session.max_heart_rate === "number" ? session.max_heart_rate : null);
-    if (avgHr && avgHr > 0) push("avg_hr", "Avg HR", `${Math.round(avgHr)} bpm`, "heart", avgPaceText !== "-" ? `Pace ${avgPaceText}` : undefined);
-    if (maxHr && maxHr > 0) push("max_hr", "Max HR", `${Math.round(maxHr)} bpm`, "heart");
+    if (avgHr && avgHr > 0) push("avg_hr", t("detail.avgHr"), `${Math.round(avgHr)} bpm`, "heart", avgPaceText !== "-" ? `${t("detail.pace")} ${avgPaceText}` : undefined);
+    if (maxHr && maxHr > 0) push("max_hr", t("detail.maxHr"), `${Math.round(maxHr)} bpm`, "heart");
 
-    if (recordStats.maxAlt > 0) push("max_alt", "Max Altitude", `${convertElevationMeters(recordStats.maxAlt, distanceUnit).toFixed(0)} ${elevationLabel(distanceUnit)}`, "mountain");
-    if (recordStats.avgPower > 0) push("avg_power", "Avg Power", `${Math.round(recordStats.avgPower)} W`, "power");
+    if (recordStats.maxAlt > 0) push("max_alt", t("detail.maxAltitude"), `${convertElevationMeters(recordStats.maxAlt, distanceUnit).toFixed(0)} ${elevationLabel(distanceUnit)}`, "mountain");
+    if (recordStats.avgPower > 0) push("avg_power", t("detail.avgPower"), `${Math.round(recordStats.avgPower)} W`, "power");
 
-    if (typeof session.avg_cadence === "number" && session.avg_cadence > 0) push("avg_cadence", "Avg Cadence", `${Math.round(session.avg_cadence)} rpm`, "cadence");
-    if (typeof session.max_cadence === "number" && session.max_cadence > 0) push("max_cadence", "Max Cadence", `${Math.round(session.max_cadence)} rpm`, "cadence");
+    if (typeof session.avg_cadence === "number" && session.avg_cadence > 0) push("avg_cadence", t("detail.avgCadence"), `${Math.round(session.avg_cadence)} rpm`, "cadence");
+    if (typeof session.max_cadence === "number" && session.max_cadence > 0) push("max_cadence", t("detail.maxCadence"), `${Math.round(session.max_cadence)} rpm`, "cadence");
     if (typeof session.beginning_body_battery === "number" && typeof session.ending_body_battery === "number") {
       const delta = session.ending_body_battery - session.beginning_body_battery;
       const deltaLabel = delta > 0 ? `+${delta}` : `${delta}`;
@@ -1067,11 +1069,11 @@ export function Dashboard({ onLogout }: Props) {
       );
     }
     if (typeof metric.vo2_max === "number" && metric.vo2_max > 0) push("vo2_max", "VO2 Max", `${metric.vo2_max.toFixed(1)}`, "vo2");
-    if (typeof session.total_calories === "number" && session.total_calories > 0) push("total_calories", "Calories", `${Math.round(session.total_calories)} kcal`, "flame");
-    if (lapTimestampsUtc.length > 0) push("laps", "Laps", String(lapTimestampsUtc.length), "avg");
+    if (typeof session.total_calories === "number" && session.total_calories > 0) push("total_calories", t("detail.calories"), `${Math.round(session.total_calories)} kcal`, "flame");
+    if (lapTimestampsUtc.length > 0) push("laps", t("detail.laps"), String(lapTimestampsUtc.length), "avg");
 
     return out;
-  }, [selectedActivity, selectedMetadata, recordStats, distanceDivisorValue, distanceSuffix, distanceUnit, lapTimestampsUtc.length]);
+  }, [selectedActivity, selectedMetadata, recordStats, distanceDivisorValue, distanceSuffix, distanceUnit, lapTimestampsUtc.length, t]);
 
   const lapRows = useMemo(() => {
     const laps = selectedMetadata?.laps ?? [];
@@ -1111,7 +1113,7 @@ export function Dashboard({ onLogout }: Props) {
       {/* ── Header ───────────────────────────────────────────── */}
       <header className="app-header">
         <div className="header-left">
-          <button className="icon-btn sidebar-toggle-btn" onClick={() => setIsSidebarCollapsed((v) => !v)} aria-label="Toggle sidebar">
+          <button className="icon-btn sidebar-toggle-btn" onClick={() => setIsSidebarCollapsed((v) => !v)} aria-label={t("sidebar.toggleSidebar")}>
             <IconMenu />
           </button>
           <div className="brand">
@@ -1119,25 +1121,25 @@ export function Dashboard({ onLogout }: Props) {
             <div className="brand-text">
               <h1>
                 FIT Dashboard
-                {supporterBadge && <span className="supporter-badge-inline" title="Supporter Badge Active">Supporter</span>}
+                {supporterBadge && <span className="supporter-badge-inline" title="Supporter Badge Active">{t("header.supporter")}</span>}
               </h1>
-              <span>Workout log Analytics</span>
+              <span>{t("header.workoutLogAnalytics")}</span>
             </div>
           </div>
         </div>
         <div className="header-center">
           <div className="view-toggle">
-            <button id="tab-overview" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Overview</button>
-            <button id="tab-individual" className={tab === "individual" ? "active" : ""} onClick={() => setTab("individual")}>Individual</button>
-            <button id="tab-compare" className={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>Compare</button>
+            <button id="tab-overview" className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>{t("header.overview")}</button>
+            <button id="tab-individual" className={tab === "individual" ? "active" : ""} onClick={() => setTab("individual")}>{t("header.individual")}</button>
+            <button id="tab-compare" className={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>{t("header.compare")}</button>
           </div>
         </div>
         <div className="header-right">
-          <button className="icon-btn" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="Toggle theme" title={theme === "light" ? "Dark mode" : "Light mode"}>
+          <button className="icon-btn" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="Toggle theme" title={theme === "light" ? t("header.darkMode") : t("header.lightMode")}>
             {theme === "light" ? <IconMoon /> : <IconSun />}
           </button>
-          <button className="icon-btn" onClick={toggleSettings} aria-label="Settings" title="Settings"><IconSettings /></button>
-          <button className="icon-btn" onClick={() => void onLogout()} aria-label="Logout" title="Logout"><IconLogout /></button>
+          <button className="icon-btn" onClick={toggleSettings} aria-label={t("header.settings")} title={t("header.settings")}><IconSettings /></button>
+          <button className="icon-btn" onClick={() => void onLogout()} aria-label={t("header.logout")} title={t("header.logout")}><IconLogout /></button>
         </div>
       </header>
 
@@ -1150,17 +1152,17 @@ export function Dashboard({ onLogout }: Props) {
         <aside className={`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
           {/* Collapsed strip (desktop only) */}
           <div className="sidebar-collapsed-strip">
-            <button className="sidebar-expand-btn" onClick={() => setIsSidebarCollapsed(false)} aria-label="Expand sidebar" title="Expand sidebar">
+            <button className="sidebar-expand-btn" onClick={() => setIsSidebarCollapsed(false)} aria-label={t("sidebar.expandSidebar")} title={t("sidebar.expandSidebar")}>
               <IconExpand />
             </button>
-            <span className="sidebar-collapsed-count">{filtered.length} logs</span>
+            <span className="sidebar-collapsed-count">{t("sidebar.logsCount", { count: filtered.length })}</span>
           </div>
 
           {/* Full sidebar content */}
           <div className="sidebar-inner">
             <div className="sidebar-head">
-              <h3>Activity Center</h3>
-              <button className="sidebar-collapse-btn" onClick={() => setIsSidebarCollapsed(true)} aria-label="Collapse sidebar">
+              <h3>{t("sidebar.activityCenter")}</h3>
+              <button className="sidebar-collapse-btn" onClick={() => setIsSidebarCollapsed(true)} aria-label={t("sidebar.collapseSidebar")}>
                 <IconCollapse />
               </button>
             </div>
@@ -1174,7 +1176,7 @@ export function Dashboard({ onLogout }: Props) {
                   return next;
                 });
               }}>
-                <span className="section-title">{isImporting ? `Importing... ${importDisplayIndex}/${importProgress?.total ?? 0}` : "Import Activity Files"}</span>
+                <span className="section-title">{isImporting ? t("sidebar.importingProgress", { current: importDisplayIndex, total: importProgress?.total ?? 0 }) : t("sidebar.importFiles")}</span>
                 <span className="section-header-right"><span className="chevron"><IconChevron /></span></span>
               </button>
               {isImportOpen && (
@@ -1202,32 +1204,32 @@ export function Dashboard({ onLogout }: Props) {
                     onDrop={(e) => { void handleImportDrop(e); }}
                   >
                     <input ref={fileInputRef} type="file" accept=".fit,.FIT,.tcx,.TCX,.gpx,.GPX" multiple hidden onChange={(e) => { setForceBrowserPicker(false); void importBatch(e.target.files); e.currentTarget.value = ""; }} />
-                    <div className="import-drop-label">Drag and drop .fit, .tcx, .gpx files here</div>
+                    <div className="import-drop-label">{t("sidebar.dragDrop")}</div>
                     <div className="import-actions">
                       <button
                         className="import-btn"
                         onClick={handleSelectFilesClick}
                         disabled={isImporting || isSyncing}
                       >
-                        {isImporting ? "Importing..." : "Select files (.fit/.tcx/.gpx)"}
+                        {isImporting ? t("sidebar.importing") : t("sidebar.selectFiles")}
                       </button>
                       <button
                         className="btn-secondary import-sync-btn"
                         onClick={() => void syncFromStorage()}
                         disabled={isImporting || isSyncing}
-                        aria-label={isSyncing ? "Sync in progress" : "Sync"}
-                        title={isSyncing ? "Sync in progress" : "Sync"}
+                        aria-label={isSyncing ? t("sidebar.syncInProgress") : t("sidebar.sync")}
+                        title={isSyncing ? t("sidebar.syncInProgress") : t("sidebar.sync")}
                       >
-                        {isSyncing ? <span className="btn-spinner" aria-hidden="true" /> : <><IconRefresh /> Sync</>}
+                        {isSyncing ? <span className="btn-spinner" aria-hidden="true" /> : <><IconRefresh /> {t("sidebar.sync")}</>}
                       </button>
                     </div>
                     {isImporting && importProgress && (
                       <div className="import-hint" role="status" aria-live="polite">
-                        {`Import queue: ${importDisplayIndex}/${importProgress.total}`}
+                        {t("sidebar.importQueue", { current: importDisplayIndex, total: importProgress.total })}
                         {importProgress.current ? ` - ${importProgress.current}` : ""}
                       </div>
                     )}
-                    <span className="import-hint">Drop files here or use Select files. Batch queue runs sequentially for stability.</span>
+                    <span className="import-hint">{t("sidebar.dropHint")}</span>
                   </div>
                 </div>
               )}
@@ -1243,7 +1245,7 @@ export function Dashboard({ onLogout }: Props) {
                 });
               }}>
                 <span className="section-title-with-action">
-                  <span className="section-title">{hasFilters ? "Filter Active" : "Filters"}</span>
+                  <span className="section-title">{hasFilters ? t("sidebar.filterActive") : t("sidebar.filters")}</span>
                   {hasFilters && (
                     <button
                       type="button"
@@ -1253,8 +1255,8 @@ export function Dashboard({ onLogout }: Props) {
                         e.stopPropagation();
                         clearFilters();
                       }}
-                      aria-label="Reset filters"
-                      title="Reset filters"
+                      aria-label={t("sidebar.resetFilters")}
+                      title={t("sidebar.resetFilters")}
                     >
                       <IconX />
                     </button>
@@ -1265,12 +1267,12 @@ export function Dashboard({ onLogout }: Props) {
               {isFilterOpen && (
                 <div className="section-body">
                   <div className="filter-fields">
-                    <label>Sport<select value={filterSport} onChange={(e) => setFilterSport(e.target.value)}>
-                      <option value="all">All Sports</option>
+                    <label>{t("sidebar.sport")}<select value={filterSport} onChange={(e) => setFilterSport(e.target.value)}>
+                      <option value="all">{t("sidebar.allSports")}</option>
                       {sports.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select></label>
                     <label>
-                      Date Range
+                      {t("sidebar.dateRange")}
                       <div className="filter-date-wrapper" style={{ display: "flex", gap: "8px" }}>
                         <div style={{ flex: 1, position: "relative" }}>
                           <button
@@ -1280,7 +1282,7 @@ export function Dashboard({ onLogout }: Props) {
                             style={{ width: "100%", justifyContent: "flex-start", textAlign: "left", fontWeight: "normal" }}
                             onClick={() => setDatePickerFromOpen(!datePickerFromOpen)}
                           >
-                            {dateFrom ? formatDateShort(dateFrom.toISOString()) : "Start"}
+                            {dateFrom ? formatDateShort(dateFrom.toISOString()) : t("sidebar.start")}
                           </button>
                           <DatePickerPopover
                             isOpen={datePickerFromOpen}
@@ -1298,7 +1300,7 @@ export function Dashboard({ onLogout }: Props) {
                             style={{ width: "100%", justifyContent: "flex-start", textAlign: "left", fontWeight: "normal" }}
                             onClick={() => setDatePickerToOpen(!datePickerToOpen)}
                           >
-                            {dateTo ? formatDateShort(dateTo.toISOString()) : "End"}
+                            {dateTo ? formatDateShort(dateTo.toISOString()) : t("sidebar.end")}
                           </button>
                           <DatePickerPopover
                             isOpen={datePickerToOpen}
@@ -1311,14 +1313,14 @@ export function Dashboard({ onLogout }: Props) {
                       </div>
                     </label>
                     <label>
-                      Duration (minutes)
+                      {t("sidebar.durationMinutes")}
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
-                        <input style={{ minWidth: 0 }} type="number" min="0" step="1" placeholder="Min" value={minDurationMinutes} onChange={(e) => setMinDurationMinutes(e.target.value)} />
+                        <input style={{ minWidth: 0 }} type="number" min="0" step="1" placeholder={t("sidebar.min")} value={minDurationMinutes} onChange={(e) => setMinDurationMinutes(e.target.value)} />
                         <span style={{ color: "var(--text-muted)" }}>—</span>
-                        <input style={{ minWidth: 0 }} type="number" min="0" step="1" placeholder="Max" value={maxDurationMinutes} onChange={(e) => setMaxDurationMinutes(e.target.value)} />
+                        <input style={{ minWidth: 0 }} type="number" min="0" step="1" placeholder={t("sidebar.max")} value={maxDurationMinutes} onChange={(e) => setMaxDurationMinutes(e.target.value)} />
                       </div>
                     </label>
-                    <div className="filter-actions"><button className="btn-secondary" style={{ flex: 1 }} onClick={clearFilters}>Reset</button></div>
+                    <div className="filter-actions"><button className="btn-secondary" style={{ flex: 1 }} onClick={clearFilters}>{t("sidebar.reset")}</button></div>
                   </div>
                 </div>
               )}
@@ -1328,14 +1330,14 @@ export function Dashboard({ onLogout }: Props) {
 
             <div className="sidebar-search">
               <div className="sidebar-search-row">
-                <input id="sidebar-search-input" placeholder="Search by name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                <input id="sidebar-search-input" placeholder={t("sidebar.searchPlaceholder")} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
                 <div className="sidebar-sort-controls" onClick={(e) => e.stopPropagation()}>
                   <button
                     className="sidebar-sort-btn"
                     type="button"
                     onClick={() => setIsSortOpen((open) => !open)}
                     aria-label={`Sort activities by ${sortBy}`}
-                    title="Sort"
+                    title={t("sidebar.sort")}
                   >
                     <IconSort />
                   </button>
@@ -1344,15 +1346,15 @@ export function Dashboard({ onLogout }: Props) {
                     type="button"
                     onClick={() => setSortDirection((dir) => (dir === "asc" ? "desc" : "asc"))}
                     aria-label={`Toggle sort direction: ${sortDirection === "asc" ? "ascending" : "descending"}`}
-                    title={sortDirection === "asc" ? "Ascending" : "Descending"}
+                    title={sortDirection === "asc" ? t("sidebar.ascending") : t("sidebar.descending")}
                   >
                     <IconSortDirection direction={sortDirection} />
                   </button>
                   {isSortOpen && (
                     <div className="sidebar-sort-dropdown">
-                      <button type="button" className={sortBy === "date" ? "active" : ""} onClick={() => { setSortBy("date"); setIsSortOpen(false); }}>Date</button>
-                      <button type="button" className={sortBy === "name" ? "active" : ""} onClick={() => { setSortBy("name"); setIsSortOpen(false); }}>Name</button>
-                      <button type="button" className={sortBy === "duration" ? "active" : ""} onClick={() => { setSortBy("duration"); setIsSortOpen(false); }}>Duration</button>
+                      <button type="button" className={sortBy === "date" ? "active" : ""} onClick={() => { setSortBy("date"); setIsSortOpen(false); }}>{t("sidebar.sortDate")}</button>
+                      <button type="button" className={sortBy === "name" ? "active" : ""} onClick={() => { setSortBy("name"); setIsSortOpen(false); }}>{t("sidebar.sortName")}</button>
+                      <button type="button" className={sortBy === "duration" ? "active" : ""} onClick={() => { setSortBy("duration"); setIsSortOpen(false); }}>{t("sidebar.sortDuration")}</button>
                     </div>
                   )}
                 </div>
@@ -1360,15 +1362,15 @@ export function Dashboard({ onLogout }: Props) {
             </div>
 
             <div className="log-count">
-              <span>{filtered.length} of {activities.length} logs selected</span>
-              {hasFilters && <button onClick={clearFilters}>Clear filters</button>}
+              <span>{t("sidebar.logsSelected", { filtered: filtered.length, total: activities.length })}</span>
+              {hasFilters && <button onClick={clearFilters}>{t("sidebar.clearFilters")}</button>}
             </div>
 
             {/* Bulk Actions */}
             <div className="bulk-actions-bar" onClick={(e) => e.stopPropagation()}>
               <div className="bulk-export-wrapper">
                 <button className="btn-outline-accent" disabled={filtered.length === 0 || isExporting} onClick={() => setBulkExportDropdownOpen((v) => !v)}>
-                  <IconDownload /> Export filtered
+                  <IconDownload /> {t("sidebar.exportFiltered")}
                 </button>
                 {bulkExportDropdownOpen && (
                   <div className="bulk-export-dropdown">
@@ -1381,11 +1383,11 @@ export function Dashboard({ onLogout }: Props) {
               </div>
               {!confirmBulkDelete ? (
                 <button className="btn-outline-danger" disabled={filtered.length === 0 || isBulkDeleting} onClick={() => setConfirmBulkDelete(true)}>
-                  <IconTrash /> Delete filtered
+                  <IconTrash /> {t("sidebar.deleteFiltered")}
                 </button>
               ) : (
                 <div className="bulk-delete-confirm">
-                  <span>Delete {filtered.length}?</span>
+                  <span>{t("sidebar.deleteCount", { count: filtered.length })}</span>
                   <button className="btn-compact danger" onClick={() => void handleBulkDelete()}><IconCheck /></button>
                   <button className="btn-compact cancel" onClick={() => setConfirmBulkDelete(false)}><IconX /></button>
                 </div>
@@ -1414,16 +1416,16 @@ export function Dashboard({ onLogout }: Props) {
                           }}
                         />
                         <div className="inline-actions">
-                          <button className="btn-compact confirm" onClick={() => void confirmRename()} title="Save"><IconCheck /> Save</button>
-                          <button className="btn-compact cancel" onClick={() => setRenameTarget(null)} title="Cancel"><IconX /> Cancel</button>
+                          <button className="btn-compact confirm" onClick={() => void confirmRename()} title={t("sidebar.save")}><IconCheck /> {t("sidebar.save")}</button>
+                          <button className="btn-compact cancel" onClick={() => setRenameTarget(null)} title={t("sidebar.cancel")}><IconX /> {t("sidebar.cancel")}</button>
                         </div>
                       </div>
                     ) : isDeleting ? (
                       <div className="inline-delete-confirm">
-                        <span>Delete this activity?</span>
+                        <span>{t("sidebar.deleteActivity")}</span>
                         <div className="inline-actions">
-                          <button className="btn-compact danger" onClick={() => void confirmDelete()}><IconTrash /> Delete</button>
-                          <button className="btn-compact cancel" onClick={() => setDeleteTarget(null)}><IconX /> Cancel</button>
+                          <button className="btn-compact danger" onClick={() => void confirmDelete()}><IconTrash /> {t("sidebar.delete")}</button>
+                          <button className="btn-compact cancel" onClick={() => setDeleteTarget(null)}><IconX /> {t("sidebar.cancel")}</button>
                         </div>
                       </div>
                     ) : (
@@ -1480,7 +1482,7 @@ export function Dashboard({ onLogout }: Props) {
                 {filtered.length === 0 && (
                   <div className="empty-state" style={{ minHeight: 120, border: "none", padding: "1rem" }}>
                     <span className="empty-icon"><IconClipboard /></span>
-                    <span>No activities match filters</span>
+                    <span>{t("sidebar.noActivitiesMatch")}</span>
                   </div>
                 )}
               </div>
@@ -1488,10 +1490,10 @@ export function Dashboard({ onLogout }: Props) {
 
             <div className="sidebar-footer">
               <div className="sidebar-footer-left">
-                <span>{activities.length} file(s) imported</span>
+                <span>{t("sidebar.filesImported", { count: activities.length })}</span>
                 {versionBadgeStatus.state === "latest" && (
                   <span className="version-status-badge latest" title="You are on the latest release">
-                    Latest
+                    {t("sidebar.latest")}
                   </span>
                 )}
                 {versionBadgeStatus.state === "update" && versionBadgeStatus.latestVersion && (
@@ -1502,11 +1504,11 @@ export function Dashboard({ onLogout }: Props) {
                     rel="noreferrer noopener"
                     title={`A newer release is available: ${versionBadgeStatus.latestVersion}`}
                   >
-                    Update to {versionBadgeStatus.latestVersion}
+                    {t("sidebar.updateTo", { version: versionBadgeStatus.latestVersion })}
                   </a>
                 )}
               </div>
-              <button onClick={() => void refresh()} title="Refresh data"><IconRefresh /></button>
+              <button onClick={() => void refresh()} title={t("sidebar.refreshData")}><IconRefresh /></button>
             </div>
           </div>
         </aside>
@@ -1523,20 +1525,20 @@ export function Dashboard({ onLogout }: Props) {
             activities.length === 0 ? (
               <div className="empty-state">
                 <span className="empty-icon"><IconBarChart size={40} /></span>
-                <span>Import logs to see overview.</span>
+                <span>{t("overview.importLogsToSee")}</span>
               </div>
             ) : (
             <>
               <div className="stats-row">
-                <div className="stat-card"><div className="stat-icon"><IconActivity /></div><div className="stat-value">{filtered.length}</div><div className="stat-label">Filtered Activities</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconDistance /></div><div className="stat-value">{totalDistance.toFixed(1)} <small>{distanceSuffix}</small></div><div className="stat-label">Total Distance</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDuration(totalDuration)}</div><div className="stat-label">Total Duration</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconSport /></div><div className="stat-value">{filteredSports.length}</div><div className="stat-label">Unique Sports</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconActivity /></div><div className="stat-value">{filtered.length}</div><div className="stat-label">{t("overview.filteredActivities")}</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconDistance /></div><div className="stat-value">{totalDistance.toFixed(1)} <small>{distanceSuffix}</small></div><div className="stat-label">{t("overview.totalDistance")}</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDuration(totalDuration)}</div><div className="stat-label">{t("overview.totalDuration")}</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconSport /></div><div className="stat-value">{filteredSports.length}</div><div className="stat-label">{t("overview.uniqueSports")}</div></div>
               </div>
               <div className="stats-row">
-                <div className="stat-card"><div className="stat-icon"><IconAvg /></div><div className="stat-value">{avgDistance.toFixed(1)} <small>{distanceSuffix}</small></div><div className="stat-label">Avg Distance / Activity</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDurationShort(avgDuration)}</div><div className="stat-label">Avg Duration / Activity</div></div>
-                <div className="stat-card"><div className="stat-icon"><IconDevice /></div><div className="stat-value">{filteredDevices.length}</div><div className="stat-label">Devices</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconAvg /></div><div className="stat-value">{avgDistance.toFixed(1)} <small>{distanceSuffix}</small></div><div className="stat-label">{t("overview.avgDistancePerActivity")}</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconClock /></div><div className="stat-value">{formatDurationShort(avgDuration)}</div><div className="stat-label">{t("overview.avgDurationPerActivity")}</div></div>
+                <div className="stat-card"><div className="stat-icon"><IconDevice /></div><div className="stat-value">{filteredDevices.length}</div><div className="stat-label">{t("overview.devices")}</div></div>
               </div>
               <div className="overview-contribution-row">
                 <div className="overview-contribution-main">
@@ -1562,16 +1564,16 @@ export function Dashboard({ onLogout }: Props) {
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
                     {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
                     {deviceBadgeSerial && <span className="badge device">SN {deviceBadgeSerial}</span>}
-                    <label className="detail-toggle-badge" title="Use dynamic rolling average smoothing. As you zoom in, more detailed points are used.">
+                    <label className="detail-toggle-badge" title={t("detail.smoothGraphsTooltip")}>
                       <input
                         type="checkbox"
                         checked={smoothGraphs}
                         onChange={(e) => setSmoothGraphs(e.target.checked)}
                       />
-                      <span>Smooth graphs</span>
+                      <span>{t("detail.smoothGraphs")}</span>
                     </label>
                     <button className="btn-secondary" style={{ padding: "0.25rem 0.55rem", fontSize: "0.74rem" }} onClick={() => setTelemetryZoom(null)}>
-                      Reset Zoom
+                      {t("detail.resetZoom")}
                     </button>
                   </div>
                 </div>
@@ -1599,28 +1601,28 @@ export function Dashboard({ onLogout }: Props) {
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>Heart Rate and Pace</h3><ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} /></div>
+                <div className="panel"><h3>{t("detail.heartRateAndPace")}</h3><ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} /></div>
                 <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
               </div>
               <ActivityInsights records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
               {lapRows.length > 0 && (
                 <div className="panel laps-table-panel">
-                  <h3>Laps</h3>
+                  <h3>{t("detail.laps")}</h3>
                   <div className="laps-table-wrap">
                     <table className="laps-table">
                       <thead>
                         <tr>
-                          <th>Laps</th>
-                          <th>Time</th>
-                          <th>Cumulative Time</th>
-                          <th>Distance</th>
-                          <th>Avg Pace</th>
-                          <th>Avg HR</th>
-                          <th>Max HR</th>
-                          <th>Total Ascent</th>
-                          <th>Total Descent</th>
-                          <th>Avg Cadence</th>
-                          <th>Calories</th>
+                          <th>{t("detail.laps")}</th>
+                          <th>{t("detail.time")}</th>
+                          <th>{t("detail.cumulativeTime")}</th>
+                          <th>{t("detail.distance")}</th>
+                          <th>{t("detail.avgPace")}</th>
+                          <th>{t("detail.avgHr")}</th>
+                          <th>{t("detail.maxHr")}</th>
+                          <th>{t("detail.totalAscent")}</th>
+                          <th>{t("detail.totalDescent")}</th>
+                          <th>{t("detail.avgCadence")}</th>
+                          <th>{t("detail.calories")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1642,7 +1644,7 @@ export function Dashboard({ onLogout }: Props) {
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td>Summary</td>
+                          <td>{t("detail.summary")}</td>
                           <td>{formatDuration(lapRows.reduce((a, b) => a + (b.lapTimeSec || 0), 0))}</td>
                           <td>-</td>
                           <td>{(() => {
@@ -1688,7 +1690,7 @@ export function Dashboard({ onLogout }: Props) {
           ) : (
             <div className="empty-state">
               <span className="empty-icon"><IconBarChart size={40} /></span>
-              <span>Select an activity from the sidebar to inspect individual telemetry.</span>
+              <span>{t("detail.selectActivity")}</span>
             </div>
           )}
         </main>
@@ -1697,11 +1699,11 @@ export function Dashboard({ onLogout }: Props) {
       {/* Context Menu */}
       {contextMenu && (
         <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
-          <button onClick={onRenameClick}><IconEdit /> Rename</button>
-          <button className="ctx-danger" onClick={onDeleteClick}><IconTrash /> Delete</button>
+          <button onClick={onRenameClick}><IconEdit /> {t("contextMenu.rename")}</button>
+          <button className="ctx-danger" onClick={onDeleteClick}><IconTrash /> {t("contextMenu.delete")}</button>
           <div className="ctx-divider" />
           <div className="ctx-export-parent" onMouseEnter={() => setContextExportOpen(true)} onMouseLeave={() => setContextExportOpen(false)}>
-            <button className="ctx-with-submenu"><IconDownload /> Export <IconChevron /></button>
+            <button className="ctx-with-submenu"><IconDownload /> {t("contextMenu.export")} <IconChevron /></button>
             {contextExportOpen && (
               <div className="ctx-submenu">
                 <button onClick={() => void handleSingleExport(contextMenu.activityId, "csv")}><IconFile /> CSV</button>
@@ -1720,14 +1722,14 @@ export function Dashboard({ onLogout }: Props) {
           <div className="bulk-progress-modal">
             <div className="bulk-progress-title">
               {isExporting ? (
-                <><IconDownload /> Exporting Activities</>
+                <><IconDownload /> {t("bulk.exportingActivities")}</>
               ) : (
-                <><IconTrash /> Deleting Activities</>
+                <><IconTrash /> {t("bulk.deletingActivities")}</>
               )}
             </div>
             {isExporting && exportProgress && (
               <>
-                <div className="bulk-progress-file">{exportProgress.currentFile || "Finishing..."}</div>
+                <div className="bulk-progress-file">{exportProgress.currentFile || t("bulk.finishing")}</div>
                 <div className="bulk-progress-track">
                   <div className="bulk-progress-fill" style={{ width: `${(exportProgress.done / (exportProgress.total || 1)) * 100}%` }} />
                 </div>
@@ -1739,7 +1741,7 @@ export function Dashboard({ onLogout }: Props) {
             )}
             {isBulkDeleting && bulkDeleteProgress && (
               <>
-                <div className="bulk-progress-file">Removing activity data...</div>
+                <div className="bulk-progress-file">{t("bulk.removingData")}</div>
                 <div className="bulk-progress-track">
                   <div className="bulk-progress-fill danger" style={{ width: `${(bulkDeleteProgress.done / (bulkDeleteProgress.total || 1)) * 100}%` }} />
                 </div>

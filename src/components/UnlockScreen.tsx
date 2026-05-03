@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   onSubmit: (password: string) => Promise<void>;
@@ -8,6 +9,7 @@ export function UnlockScreen({ onSubmit }: Props) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { t } = useTranslation();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -17,7 +19,7 @@ export function UnlockScreen({ onSubmit }: Props) {
       await onSubmit(password);
       setError(null);
     } catch {
-      setError("Invalid password.");
+      setError(t("unlock.invalidPassword"));
     } finally {
       setIsSubmitting(false);
     }
@@ -25,22 +27,22 @@ export function UnlockScreen({ onSubmit }: Props) {
 
   return (
     <div className="auth-card">
-      <h1>Unlock Dashboard</h1>
-      <p>Enter your password to open your local dashboard.</p>
+      <h1>{t("unlock.title")}</h1>
+      <p>{t("unlock.subtitle")}</p>
       <form onSubmit={handleSubmit}>
         <input
           id="unlock-password"
           value={password}
           type="password"
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Password"
+          placeholder={t("unlock.passwordPlaceholder")}
           autoComplete="current-password"
           autoFocus
         />
         {error && <div className="error">{error}</div>}
         <button type="submit" disabled={isSubmitting || !password.trim()}>
           {isSubmitting ? <span className="btn-spinner" aria-hidden="true" /> : null}
-          {isSubmitting ? "Logging in..." : "Unlock"}
+          {isSubmitting ? t("unlock.loggingIn") : t("unlock.unlock")}
         </button>
       </form>
     </div>

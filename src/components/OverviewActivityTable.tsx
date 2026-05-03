@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Activity } from "../types";
 import { useSettingsStore } from "../stores/settingsStore";
 import { distanceDivisor, distanceLabel, speedLabel, type DistanceUnit } from "../lib/units";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   activities: Activity[];
@@ -61,6 +62,7 @@ function formatPace(secondsPerUnit: number, unit: DistanceUnit): string {
 export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: Props) {
   const overviewTableDays = useSettingsStore((s) => s.overviewTableDays);
   const setOverviewTableDays = useSettingsStore((s) => s.setOverviewTableDays);
+  const { t } = useTranslation();
 
   const [daysInput, setDaysInput] = useState(String(overviewTableDays));
   const [appliedDays, setAppliedDays] = useState(overviewTableDays);
@@ -139,9 +141,9 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
   return (
     <div className="panel overview-activity-table-panel">
       <div className="overview-activity-table-header">
-        <h3>Activity Summary Table</h3>
+        <h3>{t("table.activitySummary")}</h3>
         <div className="overview-activity-table-days-filter">
-          <label htmlFor="overview-last-days">last</label>
+          <label htmlFor="overview-last-days">{t("table.last")}</label>
           <input
             id="overview-last-days"
             type="number"
@@ -150,8 +152,8 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
             value={daysInput}
             onChange={(e) => setDaysInput(e.target.value)}
           />
-          <span>days</span>
-          <button className="btn-secondary" onClick={applyDaysFilter}>Apply</button>
+          <span>{t("table.days")}</span>
+          <button className="btn-secondary" onClick={applyDaysFilter}>{t("table.apply")}</button>
         </div>
       </div>
 
@@ -159,16 +161,16 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
         <table className="overview-activity-table">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Activity</th>
-              <th>Sport</th>
-              <th>Duration</th>
-              <th>Distance</th>
-              <th>Avg Pace</th>
-              <th>Avg Speed</th>
-              <th>Avg HR</th>
-              <th>Max HR</th>
-              <th>Avg Cadence</th>
+              <th>{t("table.date")}</th>
+              <th>{t("table.activity")}</th>
+              <th>{t("table.sport")}</th>
+              <th>{t("table.duration")}</th>
+              <th>{t("table.distance")}</th>
+              <th>{t("table.avgPace")}</th>
+              <th>{t("table.avgSpeed")}</th>
+              <th>{t("table.avgHr")}</th>
+              <th>{t("table.maxHr")}</th>
+              <th>{t("table.avgCadence")}</th>
             </tr>
           </thead>
           <tbody>
@@ -195,7 +197,7 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
             ))}
             {pageRows.length === 0 && (
               <tr>
-                <td colSpan={10} className="overview-activity-table-empty">No activities in the selected range.</td>
+                <td colSpan={10} className="overview-activity-table-empty">{t("table.noActivitiesInRange")}</td>
               </tr>
             )}
           </tbody>
@@ -203,10 +205,10 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
       </div>
 
       <div className="overview-activity-table-footer">
-        <span>{rows.length} activities</span>
+        <span>{t("table.activitiesCount", { count: rows.length })}</span>
         <div className="overview-activity-table-pagination">
-          <button className="btn-secondary" onClick={() => setPage(1)} disabled={currentPage <= 1}>First</button>
-          <button className="btn-secondary" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>Prev</button>
+          <button className="btn-secondary" onClick={() => setPage(1)} disabled={currentPage <= 1}>{t("table.first")}</button>
+          <button className="btn-secondary" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>{t("table.prev")}</button>
           {visiblePageNumbers.map((pageNumber) => (
             <button
               key={`page-${pageNumber}`}
@@ -217,8 +219,8 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
               {pageNumber}
             </button>
           ))}
-          <button className="btn-secondary" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>Next</button>
-          <button className="btn-secondary" onClick={() => setPage(totalPages)} disabled={currentPage >= totalPages}>Last</button>
+          <button className="btn-secondary" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>{t("table.next")}</button>
+          <button className="btn-secondary" onClick={() => setPage(totalPages)} disabled={currentPage >= totalPages}>{t("table.last_page")}</button>
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { openExternalLink } from "../lib/links";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   supporterBadge: boolean;
@@ -7,17 +8,18 @@ type Props = {
 };
 
 export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) {
+  const { t } = useTranslation();
   if (supporterBadge || dismissed) return null;
 
   return (
     <div className="donation-banner" role="region" aria-label="Supporter banner" style={{ textAlign: "center" }}>
       <div className="donation-banner-content">
         <span className="donation-banner-text donation-banner-text--full">
-          No subscriptions. No advertisements. You are in control of your data.
+          {t("donation.noSubscriptions")}
         </span>
         {" "}
         <span className="donation-banner-text">
-          Support on{" "}
+          {t("donation.supportOn")}{" "}
           <a
             className="donation-banner-text-link"
             href="https://ko-fi.com/arpandesign"
@@ -27,7 +29,7 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
           >
             Ko-Fi
           </a>
-          {" "}or get your
+          {" "}{t("donation.orGetYour")}
         </span>
         {" "}
         <a
@@ -37,10 +39,10 @@ export function DonationBanner({ supporterBadge, dismissed, onDismiss }: Props) 
           rel="noreferrer"
           onClick={openExternalLink}
         >
-          supporter badge
+          {t("donation.supporterBadge")}
         </a>
       </div>
-      <button className="donation-banner-dismiss" onClick={onDismiss} title="Dismiss banner" aria-label="Dismiss banner">
+      <button className="donation-banner-dismiss" onClick={onDismiss} title={t("donation.dismissBanner")} aria-label={t("donation.dismissBanner")}>
         ×
       </button>
     </div>

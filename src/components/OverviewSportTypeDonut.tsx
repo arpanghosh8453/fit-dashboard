@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import type { Activity } from "../types";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   activities: Activity[];
@@ -11,6 +12,7 @@ const COLORS = ["#06b6d4", "#22c55e", "#f59e0b", "#f97316", "#ef4444", "#a855f7"
 
 export function OverviewSportTypeDonut({ activities, theme }: Props) {
   const isDark = theme === "dark";
+  const { t } = useTranslation();
   const axisColor = isDark ? "#a1a1aa" : "#475569";
   const tooltipBg = isDark ? "rgba(14, 22, 45, 0.95)" : "rgba(255, 255, 255, 0.95)";
   const tooltipBorder = isDark ? "rgba(100, 140, 220, 0.2)" : "rgba(0, 0, 0, 0.08)";
@@ -67,7 +69,7 @@ export function OverviewSportTypeDonut({ activities, theme }: Props) {
       left: "center",
       top: "36%",
       style: {
-        text: `${activities.length}\nActivities`,
+        text: `${activities.length}\n${t("donut.activities")}`,
         textAlign: "center",
         fill: axisColor,
         fontSize: 12,
@@ -78,7 +80,7 @@ export function OverviewSportTypeDonut({ activities, theme }: Props) {
 
   return (
     <div className="panel overview-sport-donut-panel">
-      <h3>Activity Types</h3>
+      <h3>{t("donut.activityTypes")}</h3>
       <ReactECharts option={option} notMerge style={{ height: 240, width: "100%" }} />
     </div>
   );

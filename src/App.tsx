@@ -5,6 +5,7 @@ import { UnlockScreen } from "./components/UnlockScreen";
 import { Dashboard } from "./components/Dashboard";
 import { useActivityStore } from "./stores/activityStore";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useTranslation } from "./lib/i18n";
 import appIcon from "./assets/app-icon.svg";
 
 type Screen = "loading" | "onboarding" | "unlock" | "dashboard";
@@ -15,6 +16,7 @@ export function App() {
   const refresh = useActivityStore((s) => s.refresh);
   const theme = useSettingsStore((s) => s.theme);
   const hydrateSettings = useSettingsStore((s) => s.hydrate);
+  const { t } = useTranslation();
 
   async function resolveStartScreen() {
     try {
@@ -39,7 +41,7 @@ export function App() {
       }
       setScreen("unlock");
     } catch {
-      setStatusError("Could not reach the backend. Ensure server is running, then retry.");
+      setStatusError(t("app.connectionError"));
       setScreen("loading");
     }
   }
@@ -66,10 +68,10 @@ export function App() {
     if (statusError) {
       return (
         <div className="center-screen auth-card stack gap-md">
-          <h1>Connection issue</h1>
+          <h1>{t("app.connectionIssue")}</h1>
           <p>{statusError}</p>
           <button type="button" onClick={() => void resolveStartScreen()}>
-            Retry
+            {t("app.retry")}
           </button>
         </div>
       );
@@ -83,7 +85,7 @@ export function App() {
             <span className="ring ring-3" />
             <span className="loading-core"><img src={appIcon} alt="FIT Dashboard" className="loading-core-img" /></span>
           </div>
-          <div className="loading-label">Loading dashboard...</div>
+          <div className="loading-label">{t("app.loadingDashboard")}</div>
         </div>
       </div>
     );

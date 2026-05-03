@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import type { Activity } from "../types";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   activities: Activity[];
@@ -25,6 +26,7 @@ function weekStart(date: Date): Date {
 
 export function OverviewWeeklyTrend({ activities, distanceUnit, theme }: Props) {
   const isDark = theme === "dark";
+  const { t } = useTranslation();
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
   const tooltipBg = isDark ? "rgba(14, 22, 45, 0.95)" : "rgba(255, 255, 255, 0.95)";
@@ -64,7 +66,7 @@ export function OverviewWeeklyTrend({ activities, distanceUnit, theme }: Props) 
       textStyle: { color: tooltipText, fontSize: 12 },
     },
     legend: {
-      data: ["Distance", "Duration"],
+      data: [t("trend.distance"), t("trend.duration")],
       textStyle: { color: axisColor, fontSize: 12 },
       top: 0,
     },
@@ -93,14 +95,14 @@ export function OverviewWeeklyTrend({ activities, distanceUnit, theme }: Props) 
     ],
     series: [
       {
-        name: "Distance",
+        name: t("trend.distance"),
         type: "bar",
         barMaxWidth: 18,
         itemStyle: { color: "#06b6d4", borderRadius: [4, 4, 0, 0] },
         data: buckets.map((b) => b.distance),
       },
       {
-        name: "Duration",
+        name: t("trend.duration"),
         type: "line",
         yAxisIndex: 1,
         smooth: true,
@@ -113,7 +115,7 @@ export function OverviewWeeklyTrend({ activities, distanceUnit, theme }: Props) 
 
   return (
     <div className="panel overview-weekly-trend-panel">
-      <h3>Weekly Training Trend</h3>
+      <h3>{t("trend.weeklyTrainingTrend")}</h3>
       <div className="overview-weekly-trend-chart">
         <ReactECharts option={option} notMerge style={{ height: "100%", width: "100%" }} />
       </div>

@@ -4,6 +4,7 @@ import type { RecordPoint } from "../types";
 import type { MapStyle } from "../stores/settingsStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { convertElevationMeters, convertSpeedKmh, elevationLabel, speedLabel } from "../lib/units";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   records: RecordPoint[];
@@ -28,15 +29,8 @@ const IconPause = () => (
   </svg>
 );
 
-const PATH_COLOR_OPTIONS: { value: PathColorMode; label: string }[] = [
-  { value: "solid", label: "Solid" },
-  { value: "speed", label: "Speed" },
-  { value: "heart_rate", label: "Heart Rate" },
-  { value: "cadence", label: "Cadence" },
-  { value: "altitude", label: "Altitude" },
-  { value: "power", label: "Power" },
-  { value: "temperature", label: "Temperature" },
-  { value: "time", label: "Time (Start \u2192 End)" },
+const PATH_COLOR_VALUES: PathColorMode[] = [
+  "solid", "speed", "heart_rate", "cadence", "altitude", "power", "temperature", "time",
 ];
 
 type BaseMapInfo = { label: string; tileUrl: string; attribution: string };
@@ -383,6 +377,18 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
   const theme = useSettingsStore((s) => s.theme);
   const distanceUnit = useSettingsStore((s) => s.distanceUnit);
   const selectedStyle = mapStyle === "default" ? theme : mapStyle;
+  const { t } = useTranslation();
+
+  const pathColorLabels: Record<PathColorMode, string> = useMemo(() => ({
+    solid: t("activityMap.colorSolid"),
+    speed: t("activityMap.colorSpeed"),
+    heart_rate: t("activityMap.colorHeartRate"),
+    cadence: t("activityMap.colorCadence"),
+    altitude: t("activityMap.colorAltitude"),
+    power: t("activityMap.colorPower"),
+    temperature: t("activityMap.colorTemperature"),
+    time: t("activityMap.colorTime"),
+  }), [t]);
 
   const [pathColorMode, setPathColorMode] = useState<PathColorMode>("heart_rate");
   const [terrainEnabled, setTerrainEnabled] = useState(false);
@@ -913,10 +919,10 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
   return (
     <section className="panel map-panel">
       <div className="map-header">
-        <h3>GPS Route</h3>
+        <h3>{t("activityMap.gpsRoute")}</h3>
         <div className="map-controls">
           <div className="map-control">
-            <span>Style</span>
+            <span>{t("activityMap.style")}</span>
             <select value={selectedStyle} onChange={(e) => setMapStyle(e.target.value as MapStyle)}>
               {Object.entries(BASEMAPS).map(([value, info]) => (
                 <option key={value} value={value}>{info.label}</option>
@@ -924,10 +930,10 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
             </select>
           </div>
           <div className="map-control">
-            <span>Color</span>
+            <span>{t("activityMap.color")}</span>
             <select value={pathColorMode} onChange={(e) => setPathColorMode(e.target.value as PathColorMode)}>
-              {PATH_COLOR_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              {PATH_COLOR_VALUES.map((val) => (
+                <option key={val} value={val}>{pathColorLabels[val]}</option>
               ))}
             </select>
           </div>
@@ -936,14 +942,14 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
             className={`btn-outline-secondary map-toggle-btn ${terrainEnabled ? "active" : ""}`}
             onClick={() => setTerrainEnabled((v) => !v)}
           >
-            Terrain {terrainEnabled ? "On" : "Off"}
+            {t("activityMap.terrain")} {terrainEnabled ? t("activityMap.on") : t("activityMap.off")}
           </button>
           <button
             type="button"
             className={`btn-outline-secondary map-toggle-btn ${telemetryEnabled ? "active" : ""}`}
             onClick={() => setTelemetryEnabled((v) => !v)}
           >
-            Telemetry {telemetryEnabled ? "On" : "Off"}
+            {t("activityMap.telemetry")} {telemetryEnabled ? t("activityMap.on") : t("activityMap.off")}
           </button>
         </div>
       </div>
@@ -951,20 +957,20 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
       <div className="map-canvas-wrap">
         <div ref={mapContainerRef} className="map-canvas" />
         <button className="btn-outline-secondary map-reset-zoom-btn" onClick={resetZoomToRoute}>
-          Reset zoom
+          {t("activityMap.resetZoom")}
         </button>
         {telemetryEnabled && telemetryData && (
           <div className="telemetry-overlay" aria-live="polite">
-            <div className="telemetry-overlay-title">Timeline Telemetry</div>
+            <div className="telemetry-overlay-title">{t("activityMap.timelineTelemetry")}</div>
             <div className="telemetry-overlay-grid">
-              <div><span>Point</span><strong>{telemetryData.point}</strong></div>
-              <div><span>Time</span><strong>{telemetryData.time}</strong></div>
-              <div><span>Speed</span><strong>{telemetryData.speed}</strong></div>
-              <div><span>Heart</span><strong>{telemetryData.heartRate}</strong></div>
-              <div><span>Alt</span><strong>{telemetryData.altitude}</strong></div>
-              <div><span>Cadence</span><strong>{telemetryData.cadence}</strong></div>
-              <div><span>Power</span><strong>{telemetryData.power}</strong></div>
-              <div><span>Temp</span><strong>{telemetryData.temp}</strong></div>
+              <div><span>{t("activityMap.point")}</span><strong>{telemetryData.point}</strong></div>
+              <div><span>{t("activityMap.time")}</span><strong>{telemetryData.time}</strong></div>
+              <div><span>{t("activityMap.speed")}</span><strong>{telemetryData.speed}</strong></div>
+              <div><span>{t("activityMap.heart")}</span><strong>{telemetryData.heartRate}</strong></div>
+              <div><span>{t("activityMap.alt")}</span><strong>{telemetryData.altitude}</strong></div>
+              <div><span>{t("activityMap.cadence")}</span><strong>{telemetryData.cadence}</strong></div>
+              <div><span>{t("activityMap.power")}</span><strong>{telemetryData.power}</strong></div>
+              <div><span>{t("activityMap.temp")}</span><strong>{telemetryData.temp}</strong></div>
             </div>
           </div>
         )}
@@ -999,7 +1005,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
           onClick={() => setPlaybackSpeedIndex((i) => (i + 1) % PLAYBACK_SPEEDS.length)}
           disabled={coordinates.length < 2}
         >
-          Speed {playbackSpeed}x
+          {t("activityMap.speed")} {playbackSpeed}x
         </button>
         <span className="map-playback-time">{formatElapsed(currentElapsedSeconds)} / {formatElapsed(totalElapsedSeconds)}</span>
       </div>
@@ -1008,16 +1014,16 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
         <div className="color-legend">
           <div className="color-gradient-bar" />
           <div className="color-labels">
-            <span>Low</span>
-            <span>{PATH_COLOR_OPTIONS.find((o) => o.value === pathColorMode)?.label ?? ""}</span>
-            <span>High</span>
+            <span>{t("activityMap.low")}</span>
+            <span>{pathColorLabels[pathColorMode]}</span>
+            <span>{t("activityMap.high")}</span>
           </div>
         </div>
       )}
 
       {!coordinates.length && (
         <p className="small" style={{ textAlign: "center", padding: "0.5rem 0" }}>
-          No GPS coordinates found in this activity.
+          {t("activityMap.noGpsCoordinates")}
         </p>
       )}
     </section>

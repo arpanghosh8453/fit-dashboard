@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
 import { convertElevationMeters, convertSpeedMps, elevationLabel, speedLabel, type DistanceUnit } from "../lib/units";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   compareIds: number[];
@@ -43,6 +44,7 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
   const [loading, setLoading] = useState(false);
   const [dataSets, setDataSets] = useState<{ name: string; records: RecordPoint[] }[]>([]);
   const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
+  const { t } = useTranslation();
 
   useEffect(() => {
     let cancelled = false;
@@ -75,13 +77,13 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
   if (compareIds.length === 0) {
     return (
       <div className="empty-state">
-        <span>Select up to 4 activities from the sidebar using the checkboxes to compare them.</span>
+        <span>{t("compare.selectActivities")}</span>
       </div>
     );
   }
 
   if (loading) {
-    return <div className="small" style={{ padding: "2rem 0", textAlign: "center" }}>Loading comparison data...</div>;
+    return <div className="small" style={{ padding: "2rem 0", textAlign: "center" }}>{t("compare.loading")}</div>;
   }
 
   const isDark = theme === "dark";
@@ -187,13 +189,13 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button className="btn-secondary" onClick={() => setZoomRange(null)}>
-          Reset Zoom
+          {t("compare.resetZoom")}
         </button>
       </div>
-      <div className="panel"><ReactECharts option={createOption("Heart Rate", "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Speed", speedLabel(distanceUnit), "speed_m_s")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Power", "W", "power")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption("Altitude", elevationLabel(distanceUnit), "altitude_m")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.heartRate"), "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.speed"), speedLabel(distanceUnit), "speed_m_s")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.power"), "W", "power")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      <div className="panel"><ReactECharts option={createOption(t("compare.altitude"), elevationLabel(distanceUnit), "altitude_m")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { enableChartWheelPageScroll } from "../lib/chartScroll";
 import { buildHeartRateZones } from "../lib/hrZones";
 import { applyRollingAverageSeries, getDynamicSmoothingWindow } from "../lib/chartSmoothing";
 import { convertDistanceMeters, convertPaceMinPerKm, distanceLabel, paceLabel, type DistanceUnit } from "../lib/units";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   records: RecordPoint[];
@@ -29,6 +30,7 @@ export function ActivityChart({
   const t0 = records[0]?.timestamp_ms ?? 0;
   const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
   const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
+  const { t } = useTranslation();
   
   // Format MM:SS or HH:MM:SS
   const formatRelTime = (ms: number) => {
@@ -108,13 +110,13 @@ export function ActivityChart({
         const distanceKm = p?.value?.[3] as number | null | undefined;
         if (distanceKm !== null && distanceKm !== undefined) {
           const distanceInUnit = convertDistanceMeters(Number(distanceKm) * 1000, distanceUnit);
-          html += `<div style="margin-top:2px;">Distance: <strong>${distanceInUnit.toFixed(2)} ${distanceLabel(distanceUnit)}</strong></div>`;
+          html += `<div style="margin-top:2px;">${t("chart.distance")}: <strong>${distanceInUnit.toFixed(2)} ${distanceLabel(distanceUnit)}</strong></div>`;
         }
         return html;
       }
     },
     legend: {
-      data: ["Heart Rate"],
+      data: [t("chart.heartRate")],
       textStyle: { color: axisColor, fontSize: 12 },
       top: 0,
     },
@@ -162,7 +164,7 @@ export function ActivityChart({
     ],
     series: [
       {
-        name: "Heart Rate",
+        name: t("chart.heartRate"),
         type: "line",
         smooth: smoothGraphs,
         showSymbol: false,
@@ -203,7 +205,7 @@ export function ActivityChart({
       }
     },
     legend: {
-      data: ["Pace"],
+      data: [t("chart.pace")],
       textStyle: { color: axisColor, fontSize: 12 },
       top: 0,
     },
@@ -237,7 +239,7 @@ export function ActivityChart({
     ],
     series: [
       {
-        name: "Pace",
+        name: t("chart.pace"),
         type: "line",
         smooth: smoothGraphs,
         showSymbol: false,

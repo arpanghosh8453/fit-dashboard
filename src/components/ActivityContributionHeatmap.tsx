@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Activity } from "../types";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   activities: Activity[];
@@ -25,6 +26,7 @@ function addDays(d: Date, n: number): Date {
 }
 
 export function ActivityContributionHeatmap({ activities }: Props) {
+  const { t } = useTranslation();
   const { weeks, counts, maxCount, startDate, endDate } = useMemo(() => {
     const today = startOfDay(new Date());
     const rangeStart = addDays(today, -364);
@@ -78,7 +80,7 @@ export function ActivityContributionHeatmap({ activities }: Props) {
   return (
     <div className="panel overview-activity-contribution-panel">
       <div className="overview-heatmap-head">
-        <h3>Activity Contributions</h3>
+        <h3>{t("heatmap.activityContributions")}</h3>
         <span className="small">{rangeLabel}</span>
       </div>
       <div className="overview-heatmap-wrap">
@@ -97,9 +99,9 @@ export function ActivityContributionHeatmap({ activities }: Props) {
 
           <div className="overview-heatmap-body">
             <div className="overview-heatmap-daylabels">
-              <span>Mon</span>
-              <span>Wed</span>
-              <span>Fri</span>
+              <span>{t("heatmap.mon")}</span>
+              <span>{t("heatmap.wed")}</span>
+              <span>{t("heatmap.fri")}</span>
             </div>
             <div className="overview-heatmap-weeks">
               {weeks.map((week, wi) => (
@@ -111,7 +113,7 @@ export function ActivityContributionHeatmap({ activities }: Props) {
                       <div
                         key={key}
                         className="overview-heatmap-cell"
-                        title={`${d.toDateString()} - ${count} activit${count === 1 ? "y" : "ies"}`}
+                        title={`${d.toDateString()} - ${count} ${count === 1 ? t("heatmap.activity") : t("heatmap.activities")}`}
                         style={{ backgroundColor: cellColor(count) }}
                       />
                     );
@@ -123,13 +125,13 @@ export function ActivityContributionHeatmap({ activities }: Props) {
         </div>
       </div>
       <div className="overview-heatmap-legend small">
-        <span>Less</span>
+        <span>{t("heatmap.less")}</span>
         <div className="overview-heatmap-cell" style={{ backgroundColor: "rgba(148, 163, 184, 0.20)" }} />
         <div className="overview-heatmap-cell" style={{ backgroundColor: "#155e75" }} />
         <div className="overview-heatmap-cell" style={{ backgroundColor: "#0891b2" }} />
         <div className="overview-heatmap-cell" style={{ backgroundColor: "#06b6d4" }} />
         <div className="overview-heatmap-cell" style={{ backgroundColor: "#22d3ee" }} />
-        <span>More</span>
+        <span>{t("heatmap.more")}</span>
       </div>
     </div>
   );

@@ -5,9 +5,11 @@ type Theme = "light" | "dark";
 type DistanceUnit = "km" | "mi";
 type TimeFormat = "12h" | "24h";
 export type MapStyle = "default" | "light" | "dark" | "openstreet" | "topo" | "satellite";
+export type Language = string;
 
 type SettingsState = {
   theme: Theme;
+  language: Language;
   distanceUnit: DistanceUnit;
   timeFormat: TimeFormat;
   mapStyle: MapStyle;
@@ -18,6 +20,7 @@ type SettingsState = {
   hydrate: () => void;
   toggleSettings: () => void;
   setTheme: (theme: Theme) => void;
+  setLanguage: (language: Language) => void;
   setDistanceUnit: (unit: DistanceUnit) => void;
   setTimeFormat: (format: TimeFormat) => void;
   setMapStyle: (style: MapStyle) => void;
@@ -32,6 +35,7 @@ const STORAGE_KEY = "fitDashboard.settings";
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   theme: "light",
+  language: "en",
   distanceUnit: "km",
   timeFormat: "24h",
   mapStyle: "default",
@@ -47,6 +51,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const parsed = JSON.parse(raw);
       set({
         theme: parsed.theme ?? "light",
+        language: parsed.language ?? "en",
         distanceUnit: parsed.distanceUnit ?? "km",
         timeFormat: parsed.timeFormat ?? "24h",
         mapStyle: parsed.mapStyle ?? "default",
@@ -62,6 +67,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTheme: (theme) => {
     set({ theme });
     persist({ ...get(), theme });
+  },
+
+  setLanguage: (language) => {
+    set({ language });
+    persist({ ...get(), language });
   },
 
   setDistanceUnit: (distanceUnit) => {
@@ -135,6 +145,7 @@ function persist(state: SettingsState) {
     STORAGE_KEY,
     JSON.stringify({
       theme: state.theme,
+      language: state.language,
       distanceUnit: state.distanceUnit,
       timeFormat: state.timeFormat,
       mapStyle: state.mapStyle,

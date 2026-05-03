@@ -10,6 +10,7 @@ import {
   speedLabel,
   type DistanceUnit,
 } from "../lib/units";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   records: RecordPoint[];
@@ -59,6 +60,7 @@ export function ActivityInsights({
 }: Props) {
     const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
   const isDark = theme === "dark";
+  const { t: tr } = useTranslation();
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
   const tooltipBg = isDark ? "rgba(14, 22, 45, 0.95)" : "rgba(255, 255, 255, 0.95)";
@@ -77,7 +79,7 @@ export function ActivityInsights({
     return (
       <div className="empty-state" style={{ minHeight: 200 }}>
         <span className="empty-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg></span>
-        <span>Import and select an activity to unlock pace, power, cadence, and effort insights.</span>
+        <span>{tr("insights.emptyState")}</span>
       </div>
     );
   }
@@ -187,7 +189,7 @@ export function ActivityInsights({
     ],
     series: [
       {
-        name: "Speed", type: "line", smooth: smoothGraphs, showSymbol: false,
+        name: tr("insights.speed"), type: "line", smooth: smoothGraphs, showSymbol: false,
         lineStyle: { width: 2, color: "#38bdf8" },
         areaStyle: { color: isDark ? "rgba(56, 189, 248, 0.1)" : "rgba(56, 189, 248, 0.15)" },
         sampling: smoothGraphs ? "lttb" : undefined,
@@ -239,7 +241,7 @@ export function ActivityInsights({
     ],
     series: [
       {
-        name: "Elevation", type: "line", smooth: smoothGraphs, showSymbol: false,
+        name: tr("insights.elevation"), type: "line", smooth: smoothGraphs, showSymbol: false,
         lineStyle: { width: 1.5, color: "#f97316" },
         sampling: smoothGraphs ? "lttb" : undefined,
         data: elevationLineDataSmoothed,
@@ -331,7 +333,7 @@ export function ActivityInsights({
     ],
     series: [
       {
-        name: "Cadence", type: "line", smooth: smoothGraphs, showSymbol: false,
+        name: tr("insights.cadence"), type: "line", smooth: smoothGraphs, showSymbol: false,
         lineStyle: { width: 2, color: "#22d3ee" },
         sampling: smoothGraphs ? "lttb" : undefined,
         data: cadenceLineDataSmoothed,
@@ -344,7 +346,7 @@ export function ActivityInsights({
         } : undefined,
       },
       ...(hasPowerData ? [{
-        name: "Power", type: "line", yAxisIndex: 1, smooth: smoothGraphs, showSymbol: false,
+        name: tr("insights.power"), type: "line", yAxisIndex: 1, smooth: smoothGraphs, showSymbol: false,
         sampling: smoothGraphs ? "lttb" : undefined,
         data: powerLineDataSmoothed,
         lineStyle: { color: "#f97316" },
@@ -598,36 +600,36 @@ export function ActivityInsights({
   return (
     <section className="insight-grid">
       <article className="panel">
-        <h3>Speed Trend</h3>
+        <h3>{tr("insights.speedTrend")}</h3>
         <ReactECharts option={timelineOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
-          <h3>Heart Rate Zone Time</h3>
+          <h3>{tr("insights.heartRateZoneTime")}</h3>
           <ReactECharts option={zoneOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       )}
       {hasHeartRateData && (
         <article className="panel">
-          <h3>HR Histogram</h3>
+          <h3>{tr("insights.hrHistogram")}</h3>
           <ReactECharts option={hrHistogramOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       )}
       <article className="panel">
-        <h3>{hasPowerData ? "Cadence & Power" : "Cadence"}</h3>
+        <h3>{hasPowerData ? tr("insights.cadenceAndPower") : tr("insights.cadence")}</h3>
         <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
-        <h3>Effort Heatmap</h3>
+        <h3>{tr("insights.effortHeatmap")}</h3>
         <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       <article className="panel">
-        <h3>Elevation</h3>
+        <h3>{tr("insights.elevation")}</h3>
         <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
-          <h3>Power vs Heart Rate</h3>
+          <h3>{tr("insights.powerVsHeartRate")}</h3>
           <ReactECharts option={scatterOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       )}

@@ -3,6 +3,7 @@ import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { RecordPoint } from "../types";
 import type { MapStyle } from "../stores/settingsStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useTranslation } from "../lib/i18n";
 
 type Props = {
   records: RecordPoint[];
@@ -68,6 +69,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const theme = useSettingsStore((s) => s.theme);
+  const { t } = useTranslation();
   const selectedStyle = mapStyle === "default" ? theme : mapStyle;
 
   const geojson = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(() => {
@@ -295,12 +297,12 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
     <div className="panel overview-location-panel">
       <div className="map-header" style={{ marginBottom: "0.6rem" }}>
         <div>
-          <h3 style={{ marginBottom: "0.32rem" }}>Explored Locations</h3>
-          <p className="panel-subtitle">GPS density heatmap with auto-clustering at low zoom levels</p>
+          <h3 style={{ marginBottom: "0.32rem" }}>{t("map.exploredLocations")}</h3>
+          <p className="panel-subtitle">{t("map.subtitle")}</p>
         </div>
         <div className="map-controls">
           <label className="map-control">
-            <span className="small">Style</span>
+            <span className="small">{t("map.style")}</span>
             <select value={selectedStyle} onChange={(e) => setMapStyle(e.target.value as MapStyle)}>
               {Object.entries(BASEMAPS).map(([value, info]) => (
                 <option key={value} value={value}>{info.label}</option>
@@ -318,7 +320,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
           if (!map) return;
           fitToData(map);
         }}>
-          Reset zoom
+          {t("map.resetZoom")}
         </button>
       </div>
     </div>
