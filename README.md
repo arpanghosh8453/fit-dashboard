@@ -79,6 +79,8 @@
 - **Responsive Layout**: Collapsible sidebar with a persistent expand strip. Works on desktop and tablet viewports.
 - **Import Queue**: Batch import multiple FIT files with sequential processing for stability. Duplicate detection prevents re-importing the same file.
 - **Password Protection**: Argon2-hashed credentials with session-based authentication. First-use onboarding flow for initial setup.
+- **Cross-Platform**: Desktop builds for Windows, macOS, and Linux. 
+- **Multi-language Support**: Deutsch, English, Español, Français, Magyar, Italiano, Nederlands, Polski, Português, Turkce, 中文, 日本語, 한국어
 
 ## Getting Started
 
