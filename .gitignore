@@ -44,6 +44,3 @@ desktop.ini
 
 # TypeScript cache
 *.tsbuildinfo
-
-# Credentials
-scripts/creds.json
