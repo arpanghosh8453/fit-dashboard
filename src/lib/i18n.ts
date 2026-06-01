@@ -2,6 +2,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 
 import en from "../i18n/en.json";
 import de from "../i18n/de.json";
+import ru from "../i18n/ru.json";
 import es from "../i18n/es.json";
 import fr from "../i18n/fr.json";
 import hu from "../i18n/hu.json";
@@ -17,12 +18,13 @@ import ko from "../i18n/ko.json";
 type TranslationMap = Record<string, string>;
 
 const locales: Record<string, TranslationMap> = {
-  en, de, es, fr, hu, it, nl, pl, pt, tr, zh, ja, ko,
+  en, de, ru, es, fr, hu, it, nl, pl, pt, tr, zh, ja, ko,
 };
 
 export const LANGUAGES: { code: string; label: string }[] = [
   { code: "de", label: "Deutsch" },
   { code: "en", label: "English" },
+  { code: "ru", label: "Русский" },
   { code: "es", label: "Español" },
   { code: "fr", label: "Français" },
   { code: "hu", label: "Magyar" },
