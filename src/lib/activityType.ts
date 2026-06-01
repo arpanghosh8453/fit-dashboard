@@ -16,6 +16,11 @@ const CYCLING_SUB_SPORT_LABELS: Record<string, string> = {
   mountain_biking: "Mountain Biking",
 };
 
+const CYCLING_SUB_SPORT_ALIASES: Record<string, string> = {
+  spin: "indoor_cycling",
+  mountain_biking: "mountain",
+};
+
 function titleCaseWords(value: string): string {
   return value
     .trim()
@@ -28,10 +33,16 @@ function titleCaseWords(value: string): string {
     .join(" ");
 }
 
+function normalizedSport(sport?: string | null): string | null {
+  const trimmed = sport?.trim().toLowerCase();
+  if (!trimmed || trimmed === "unknown") return null;
+  return trimmed;
+}
+
 function titleCaseSport(sport?: string | null): string {
-  const trimmed = sport?.trim();
-  if (!trimmed || trimmed.toLowerCase() === "unknown") return "Activity";
-  return titleCaseWords(trimmed) || "Activity";
+  const sportKey = normalizedSport(sport);
+  if (!sportKey) return "Activity";
+  return titleCaseWords(sportKey) || "Activity";
 }
 
 function metadataSubSport(raw?: string): string | null {
@@ -55,23 +66,32 @@ function metadataSubSport(raw?: string): string | null {
   }
 }
 
-export function formatActivityType(sport?: string | null, subSport?: string | null): string {
-  const sportLabel = titleCaseSport(sport);
-  const trimmedSubSport = subSport?.trim();
-  if (!trimmedSubSport) return sportLabel;
+function normalizedSubSport(sport?: string | null, subSport?: string | null): string | null {
+  const trimmedSubSport = subSport?.trim().toLowerCase();
+  if (!trimmedSubSport || IGNORED_SUB_SPORTS.has(trimmedSubSport)) return null;
 
-  const subSportLower = trimmedSubSport.toLowerCase();
-  if (IGNORED_SUB_SPORTS.has(subSportLower)) return sportLabel;
-
-  const sportLower = sport?.trim().toLowerCase() ?? "";
-  if (sportLower === "cycling" && CYCLING_SUB_SPORT_LABELS[subSportLower]) {
-    return CYCLING_SUB_SPORT_LABELS[subSportLower];
+  const sportKey = normalizedSport(sport);
+  if (sportKey === "cycling") {
+    return CYCLING_SUB_SPORT_ALIASES[trimmedSubSport] ?? trimmedSubSport;
   }
 
-  const subSportLabel = titleCaseWords(trimmedSubSport);
+  return trimmedSubSport;
+}
+
+export function formatActivityType(sport?: string | null, subSport?: string | null): string {
+  const sportLabel = titleCaseSport(sport);
+  const subSportKey = normalizedSubSport(sport, subSport);
+  if (!subSportKey) return sportLabel;
+
+  const sportKey = normalizedSport(sport) ?? "";
+  if (sportKey === "cycling" && CYCLING_SUB_SPORT_LABELS[subSportKey]) {
+    return CYCLING_SUB_SPORT_LABELS[subSportKey];
+  }
+
+  const subSportLabel = titleCaseWords(subSportKey);
   if (!subSportLabel) return sportLabel;
 
-  if (sportLabel === "Activity" || (sportLower && subSportLower.includes(sportLower))) {
+  if (sportLabel === "Activity" || (sportKey && subSportKey.includes(sportKey))) {
     return subSportLabel;
   }
 
@@ -80,4 +100,41 @@ export function formatActivityType(sport?: string | null, subSport?: string | nu
 
 export function formatActivityTypeLabel(activity: Pick<Activity, "sport" | "metadata_json">): string {
   return formatActivityType(activity.sport, metadataSubSport(activity.metadata_json));
+}
+
+export function formatSportLabel(sport?: string | null): string {
+  return titleCaseSport(sport);
+}
+
+export function getSportFilterValue(sport?: string | null): string | null {
+  const sportKey = normalizedSport(sport);
+  return sportKey ? `sport:${sportKey}` : null;
+}
+
+export function getActivitySportFilterValue(activity: Pick<Activity, "sport">): string | null {
+  return getSportFilterValue(activity.sport);
+}
+
+export function getActivityTypeFilterValue(activity: Pick<Activity, "sport" | "metadata_json">): string | null {
+  const sportKey = normalizedSport(activity.sport);
+  const subSportKey = normalizedSubSport(activity.sport, metadataSubSport(activity.metadata_json));
+  if (!sportKey || !subSportKey) return null;
+  return `type:${sportKey}:${subSportKey}`;
+}
+
+export function activityMatchesTypeFilter(
+  activity: Pick<Activity, "sport" | "metadata_json">,
+  filterValue: string,
+): boolean {
+  if (filterValue === "all") return true;
+
+  if (filterValue.startsWith("sport:")) {
+    return getActivitySportFilterValue(activity) === filterValue;
+  }
+
+  if (filterValue.startsWith("type:")) {
+    return getActivityTypeFilterValue(activity) === filterValue;
+  }
+
+  return activity.sport === filterValue;
 }
