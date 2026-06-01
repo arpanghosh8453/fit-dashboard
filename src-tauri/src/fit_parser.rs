@@ -210,16 +210,39 @@ fn activity_type_label(sport: &str, sub_sport: Option<&str>) -> String {
 
 fn looks_like_export_id_name(name: &str) -> bool {
     let name = name.trim();
-    let numeric_parts: Vec<&str> = name.split('_').collect();
-    if numeric_parts.len() >= 2
-        && numeric_parts
-            .iter()
-            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+    if name.is_empty() {
+        return false;
+    }
+
+    let is_long_numeric_id = |value: &str| {
+        value.len() >= 8 && value.chars().all(|c| c.is_ascii_digit())
+    };
+
+    if is_long_numeric_id(name) {
+        return true;
+    }
+
+    let parts: Vec<&str> = name.split('_').collect();
+    if parts.len() >= 2 && parts.iter().all(|part| is_long_numeric_id(part)) {
+        return true;
+    }
+
+    if parts.len() == 2
+        && is_long_numeric_id(parts[0])
+        && parts[1].eq_ignore_ascii_case("ACTIVITY")
     {
         return true;
     }
 
-    name.len() >= 8 && name.chars().all(|c| c.is_ascii_digit())
+    if (parts.len() == 2 || parts.len() == 3)
+        && parts[0].contains('@')
+        && is_long_numeric_id(parts[1])
+        && (parts.len() == 2 || parts[2].eq_ignore_ascii_case("ACTIVITY"))
+    {
+        return true;
+    }
+
+    false
 }
 
 fn generated_activity_name(sport: &str, sub_sport: Option<&str>) -> String {
@@ -1073,8 +1096,13 @@ mod tests {
     fn detects_garmin_export_id_names() {
         assert!(looks_like_export_id_name("123456789_987654321"));
         assert!(looks_like_export_id_name("123456789"));
+        assert!(looks_like_export_id_name("23073077727_ACTIVITY"));
+        assert!(looks_like_export_id_name("23073077727_activity"));
+        assert!(looks_like_export_id_name("chiang.jim@gmail.com_257082758918"));
+        assert!(looks_like_export_id_name("chiang.jim@gmail.com_257082758918_ACTIVITY"));
         assert!(!looks_like_export_id_name("Lunch Ride"));
         assert!(!looks_like_export_id_name("2026-05-30"));
+        assert!(!looks_like_export_id_name("Workout_20260531"));
     }
 
     #[test]
