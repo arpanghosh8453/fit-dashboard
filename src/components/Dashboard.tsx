@@ -30,6 +30,13 @@ import {
   speedLabel,
 } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
+import {
+  activityMatchesTypeFilter,
+  formatActivityTypeLabel,
+  formatSportLabel,
+  getActivitySportFilterValue,
+  getActivityTypeFilterValue,
+} from "../lib/activityType";
 
 type Props = { onLogout: () => Promise<void> };
 
@@ -422,9 +429,10 @@ export function Dashboard({ onLogout }: Props) {
     return activities.filter((a) => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        if (!`${a.activity_name} ${a.file_name} ${a.sport}`.toLowerCase().includes(q)) return false;
+        const activityType = formatActivityTypeLabel(a);
+        if (!`${a.activity_name} ${a.file_name} ${a.sport} ${activityType}`.toLowerCase().includes(q)) return false;
       }
-      if (filterSport !== "all" && a.sport !== filterSport) return false;
+      if (!activityMatchesTypeFilter(a, filterSport)) return false;
       const ts = parseUtcDate(a.start_ts_utc).getTime();
       if (Number.isFinite(ts)) {
         if (fromTs !== null && ts < fromTs) return false;
@@ -477,7 +485,34 @@ export function Dashboard({ onLogout }: Props) {
       });
   }, [tab, filtered]);
 
-  const sports = Array.from(new Set(activities.map((a) => a.sport).filter(Boolean)));
+  const sportFilterOptions = useMemo(() => {
+    const groups = new Map<string, { label: string; children: Map<string, string> }>();
+
+    for (const activity of activities) {
+      const sportValue = getActivitySportFilterValue(activity);
+      if (!sportValue) continue;
+
+      let group = groups.get(sportValue);
+      if (!group) {
+        group = { label: formatSportLabel(activity.sport), children: new Map() };
+        groups.set(sportValue, group);
+      }
+
+      const typeValue = getActivityTypeFilterValue(activity);
+      if (typeValue) {
+        group.children.set(typeValue, formatActivityTypeLabel(activity));
+      }
+    }
+
+    return Array.from(groups.entries())
+      .sort((a, b) => a[1].label.localeCompare(b[1].label, undefined, { sensitivity: "base" }))
+      .flatMap(([value, group]) => [
+        { value, label: group.label, depth: 0 },
+        ...Array.from(group.children.entries())
+          .sort((a, b) => a[1].localeCompare(b[1], undefined, { sensitivity: "base" }))
+          .map(([childValue, childLabel]) => ({ value: childValue, label: childLabel, depth: 1 })),
+      ]);
+  }, [activities]);
   const filteredSports = Array.from(new Set(filtered.map((a) => a.sport).filter(Boolean)));
   const filteredDevices = Array.from(new Set(filtered.map((a) => a.device).filter(Boolean)));
   const selectedRecords = tab === "overview" ? overviewRecords : records;
@@ -1269,7 +1304,11 @@ export function Dashboard({ onLogout }: Props) {
                   <div className="filter-fields">
                     <label>{t("sidebar.sport")}<select value={filterSport} onChange={(e) => setFilterSport(e.target.value)}>
                       <option value="all">{t("sidebar.allSports")}</option>
-                      {sports.map((s) => <option key={s} value={s}>{s}</option>)}
+                      {sportFilterOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.depth ? `- ${option.label}` : option.label}
+                        </option>
+                      ))}
                     </select></label>
                     <label>
                       {t("sidebar.dateRange")}
@@ -1562,7 +1601,7 @@ export function Dashboard({ onLogout }: Props) {
                   <h2>{selectedActivity.activity_name || selectedActivity.file_name}</h2>
                   <div className="detail-badges">
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
-                    {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
+                    {selectedActivity.sport && <span className="badge sport">{formatActivityTypeLabel(selectedActivity)}</span>}
                     {deviceBadgeSerial && <span className="badge device">SN {deviceBadgeSerial}</span>}
                     <label className="detail-toggle-badge" title={t("detail.smoothGraphsTooltip")}>
                       <input
