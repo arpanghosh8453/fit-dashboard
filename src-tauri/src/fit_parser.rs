@@ -191,8 +191,13 @@ fn activity_type_label(sport: &str, sub_sport: Option<&str>) -> String {
         return sport_label;
     }
 
-    if matches!(sub_sport_lower.as_str(), "indoor_cycling" | "spin") {
-        return "Indoor Cycling".to_string();
+    let sport_lower = sport.trim().to_lowercase();
+    if sport_lower == "cycling" {
+        match sub_sport_lower.as_str() {
+            "indoor_cycling" | "spin" => return "Indoor Cycling".to_string(),
+            "mountain" | "mountain_biking" => return "Mountain Biking".to_string(),
+            _ => {}
+        }
     }
 
     let sub_sport_label = title_case_words(raw_sub_sport);
@@ -200,7 +205,6 @@ fn activity_type_label(sport: &str, sub_sport: Option<&str>) -> String {
         return sport_label;
     }
 
-    let sport_lower = sport.trim().to_lowercase();
     if sport_label == "Activity" || sub_sport_lower.contains(sport_lower.as_str()) {
         sub_sport_label
     } else {
@@ -1064,6 +1068,7 @@ mod tests {
     #[test]
     fn builds_readable_activity_type_labels() {
         assert_eq!(activity_type_label("cycling", Some("road")), "Road Cycling");
+        assert_eq!(activity_type_label("cycling", Some("mountain")), "Mountain Biking");
         assert_eq!(
             activity_type_label("cycling", Some("gravel_cycling")),
             "Gravel Cycling"

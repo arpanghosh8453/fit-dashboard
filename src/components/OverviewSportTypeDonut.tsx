@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import type { Activity } from "../types";
 import { useTranslation } from "../lib/i18n";
+import { formatActivityTypeLabel } from "../lib/activityType";
 
 type Props = {
   activities: Activity[];
@@ -21,7 +22,7 @@ export function OverviewSportTypeDonut({ activities, theme }: Props) {
   const data = useMemo(() => {
     const counts = new Map<string, number>();
     for (const activity of activities) {
-      const key = (activity.sport || "Unknown").trim() || "Unknown";
+      const key = formatActivityTypeLabel(activity);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
 

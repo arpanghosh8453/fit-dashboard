@@ -30,6 +30,7 @@ import {
   speedLabel,
 } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
+import { formatActivityTypeLabel } from "../lib/activityType";
 
 type Props = { onLogout: () => Promise<void> };
 
@@ -1562,7 +1563,7 @@ export function Dashboard({ onLogout }: Props) {
                   <h2>{selectedActivity.activity_name || selectedActivity.file_name}</h2>
                   <div className="detail-badges">
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
-                    {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
+                    {selectedActivity.sport && <span className="badge sport">{formatActivityTypeLabel(selectedActivity)}</span>}
                     {deviceBadgeSerial && <span className="badge device">SN {deviceBadgeSerial}</span>}
                     <label className="detail-toggle-badge" title={t("detail.smoothGraphsTooltip")}>
                       <input
