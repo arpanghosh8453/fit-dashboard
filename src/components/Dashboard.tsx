@@ -1306,7 +1306,7 @@ export function Dashboard({ onLogout }: Props) {
                       <option value="all">{t("sidebar.allSports")}</option>
                       {sportFilterOptions.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {option.depth ? `  ${option.label}` : option.label}
+                          {option.depth ? `- ${option.label}` : option.label}
                         </option>
                       ))}
                     </select></label>
