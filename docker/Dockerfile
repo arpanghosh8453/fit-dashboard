@@ -4,17 +4,31 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY . .
+COPY index.html vite.config.ts tsconfig.json ./
+COPY src-tauri/tauri.conf.json ./src-tauri/tauri.conf.json
+COPY src ./src
 ARG VITE_API_BASE=/api
 ENV VITE_API_BASE=${VITE_API_BASE}
 RUN npm run build
 
-FROM rust:1-bookworm AS backend-builder
-WORKDIR /app
+FROM rust:1-bookworm AS backend-chef
+ARG CARGO_CHEF_VERSION=0.1.77
+RUN cargo install cargo-chef --version "${CARGO_CHEF_VERSION}" --locked
+WORKDIR /app/src-tauri
 
-COPY src-tauri/Cargo.toml ./src-tauri/Cargo.toml
-COPY src-tauri/src ./src-tauri/src
-RUN cd src-tauri && cargo build --release --features web
+FROM backend-chef AS backend-planner
+COPY src-tauri ./
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM backend-chef AS backend-builder
+ARG CARGO_BUILD_JOBS
+
+COPY --from=backend-planner /app/src-tauri/recipe.json recipe.json
+RUN if [ -n "${CARGO_BUILD_JOBS}" ]; then export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS}"; fi \
+	&& cargo chef cook --release --locked --features web --recipe-path recipe.json
+COPY src-tauri ./
+RUN if [ -n "${CARGO_BUILD_JOBS}" ]; then export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS}"; fi \
+	&& cargo build --release --locked --features web
 
 FROM debian:bookworm-slim
 RUN apt-get update \
