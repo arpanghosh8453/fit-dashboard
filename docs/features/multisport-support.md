@@ -28,10 +28,30 @@ UI presents one activity row. There is no first-class sub-activity or leg view.
 - Prevent child legs from being double-counted in overview totals.
 - Keep existing single-sport activity behavior unchanged.
 
+## File Format Scope
+
+First-pass multisport support is FIT-only.
+
+Garmin Connect exports the multisport parent activity as a FIT file. When an
+individual multisport leg is selected in Garmin Connect, downloading FIT still
+returns the same full parent multisport FIT payload. In the inspected sample, FIT
+files downloaded from each selected leg had different Garmin activity-id
+filenames but identical file hashes and identical parent multisport content.
+
+Garmin Connect can export selected legs as TCX or GPX, but those files represent
+only that selected leg, not the multisport parent. TCX preserved the full selected
+leg duration in the inspected transition export. GPX preserved only the GPS track
+portion of that selected leg and omitted an initial no-GPS portion. Therefore,
+this feature does not attempt to support parent multisport GPX or TCX imports.
+
+Existing single-sport GPX and TCX import behavior is unchanged. A separate TCX
+distance issue was filed as #29 and is outside this multisport scope.
+
 ## Non-Goals
 
 - Splitting a multisport FIT file into unrelated standalone activities.
 - Supporting manual editing of leg boundaries in the first implementation.
+- Supporting multisport GPX or TCX imports.
 - Rewriting all chart and statistics code in one step if a narrower MVP can
   preserve correctness.
 - Adding support for unrelated non-activity FIT file types.
@@ -54,10 +74,10 @@ After:
 - `records` keeps `activity_id` and gains nullable `segment_id` (new column) for
   multisport record scoping.
 - `activity_segments` (new table) stores one row per FIT session/leg.
-- `activity_laps` (new table) stores first-class lap rows scoped to the parent
-  and, when known, a child segment.
-- Insert, rollback, and delete paths treat records, laps, segments, and the
-  parent activity as one unit.
+- Laps remain in `metadata_json.laps` for the first pass, with added segment
+  assignment fields when known. `activity_laps` is deferred/future scope.
+- Insert, rollback, and delete paths treat records, segment-tagged lap metadata,
+  segments, and the parent activity as one unit.
 
 ### Parser
 
@@ -78,9 +98,8 @@ After:
 - Session order and lap order are retained before conversion to database rows.
 - Segment boundaries are derived from `session.start_time`, adjacent session
   starts, and duration fields rather than blindly trusting `session.timestamp`.
-- Existing single-sport parsing still produces the same parent activity and
-  records, with empty segment/lap child tables unless first-class laps are added
-  for all activity types.
+- Existing single-sport parsing still produces the same parent activity,
+  records, and metadata-backed laps.
 
 ### Import Lifecycle
 
@@ -102,11 +121,11 @@ After:
 - Duplicate checks remain unchanged: blacklist, file hash, then exact start/end
   times.
 - A successful multisport import writes the parent activity, `activity_segments`
-  rows (new), `activity_laps` rows (new), and records with `segment_id` (new
-  column).
+  rows (new), segment-tagged laps in `metadata_json.laps`, and records with
+  `segment_id` (new column).
 - If file persistence fails after DB insert, failed-import cleanup removes all
-  rows for that activity: records, `activity_laps`, `activity_segments`, then the
-  parent activity row.
+  rows for that activity: records, `activity_segments`, then the parent activity
+  row. Segment-tagged lap metadata is removed with the parent row.
 - Deleting an activity removes all rows for that activity in the same order, then
   adds the file hash to the blacklist.
 - The manual reimport workflow remains unchanged. This issue does not add an
@@ -128,8 +147,8 @@ After:
   command argument/behavior).
 - `GET /api/activities/{activity_id}/segments` (new endpoint) and matching Tauri
   command list activity segments.
-- `GET /api/activities/{activity_id}/laps` (new endpoint) and matching Tauri
-  command return first-class laps.
+- First-pass laps stay in activity metadata. The existing activity payload carries
+  `metadata_json.laps`, and child views filter those laps by selected segment.
 - Web and desktop adapters expose the same parent/segment semantics to the
   frontend store.
 
@@ -257,9 +276,9 @@ Metadata compatibility rules:
   `session`, and `laps` from `metadata_json`.
 - Do not change `session` from the current single-session summary object to an
   array. Multisport session data should use a new namespaced object instead.
-- Do not change `laps` from the current array shape. First-class lap rows should
-  come from `activity_laps`; debug/source lap snapshots can live under the new
-  multisport namespace.
+- Do not change `laps` from the current array shape. First-pass lap display
+  remains backed by `metadata_json.laps`; debug/source lap snapshots can live
+  under the new multisport namespace.
 - Add multisport-specific metadata under `metadata_json.multisport`, for example
   `multisport.activity`, `multisport.sessions`, `multisport.laps`, and
   `multisport.assignment`.
@@ -338,8 +357,14 @@ should keep their parent `activity_id` and also receive the matching
 
 ### laps
 
-The existing importer stores laps inside `metadata_json`. Multisport needs laps
-to be scoped to a selected leg, so add a first-class lap table:
+The existing importer stores laps inside `metadata_json`. For the first pass, keep
+that storage model and add segment assignment fields to the existing lap metadata
+objects when known. Parent views read all metadata-backed laps. Child views filter
+`metadata_json.laps` by selected `segment_index`. Ambiguous laps remain visible
+only on the parent view.
+
+Future scope: add a first-class lap table if metadata-backed laps become too
+awkward or if a general lap API is added for all activity types:
 
 ```sql
 CREATE TABLE IF NOT EXISTS activity_laps (
@@ -382,21 +407,21 @@ separate segment-local lap number after filtering by `segment_id`.
 ### Lifecycle
 
 The database currently deletes only `records` and `activities` for an activity.
-Once segment and lap tables exist, all activity write paths need to treat the
-parent, segments, laps, and records as one unit:
+With first-pass segment support, activity write paths need to treat the parent,
+segments, segment-tagged lap metadata, and records as one unit:
 
-- Insert parent activity, child segments, first-class laps, and records in one
-  transaction.
+- Insert parent activity, child segments, segment-tagged lap metadata, and
+  records in one transaction.
 - If an import fails before commit, roll back the transaction.
 - If a caller cannot use the shared transaction boundary, that path must run the
-  same cleanup explicitly: delete records, laps, segments, then the parent
-  activity.
+  same cleanup explicitly: delete records, segments, then the parent activity.
 - On user deletion, delete child rows before the parent activity. The deletion
-  transaction should delete in this order: `records`, `activity_laps`,
-  `activity_segments`, then `activities`. This avoids orphaned telemetry or lap
-  rows even if foreign keys are not enforced.
+  transaction should delete in this order: `records`, `activity_segments`, then
+  `activities`. This avoids orphaned telemetry rows even if foreign keys are not
+  enforced. Segment-tagged lap metadata is removed with the parent activity row.
 - Keep single-sport cleanup unchanged except that empty child tables should not
-  leave orphans.
+  leave orphans. Future `activity_laps` work must add lap-row cleanup to the same
+  transaction.
 
 ## Import and Parser Rules
 
@@ -576,14 +601,15 @@ Recommended additions:
     `GET /api/activities/{activity_id}/records` as a compatibility alias.
   - The implementation should extend the current `records_downsampled` query to
     conditionally filter by `segment_id` before downsampling.
-- `GET /api/activities/{activity_id}/laps`
-  - Add an endpoint to return first-class laps.
-  - Add optional `segment_id` query parameter.
+- First-pass laps remain in activity metadata. The frontend should filter
+  `metadata_json.laps` by selected `segment_index` for child views. A dedicated
+  laps endpoint is deferred until first-class `activity_laps` exists.
 
 Tauri IPC must get matching command support, because the frontend uses Tauri
 commands in desktop mode and HTTP endpoints in web mode. Add or update commands
-such as `list_activity_segments`, `get_records`, and `get_activity_laps` with
-the same parent and `segment_id` semantics as the web API. The frontend `api`
+such as `list_activity_segments` and `get_records` with the same parent and
+`segment_id` semantics as the web API. First-pass lap filtering uses activity
+metadata. The frontend `api`
 adapter and activity store should expose segment-aware selection without making
 web and desktop behavior diverge.
 
@@ -700,6 +726,21 @@ Rules:
 - Child segments do not contribute separately to global totals.
 - Segment-level totals may be shown only in segment-specific drilldowns.
 
+## Export and Compare
+
+- Existing single-sport export and compare behavior should remain unchanged.
+- Export is supported for a selected child leg by using segment-scoped records in
+  the existing export shape. A child leg is a coherent single-sport view and is
+  the safest first-pass export target.
+- Multisport parent export is deferred. Parent records mix sports, output
+  streams, and segment semantics, so parent export needs a deliberate
+  multisport-specific shape before it is exposed.
+- Multisport compare behavior is not designed in the first pass. Preserve
+  existing single-sport compare behavior, but do not add special parent or child
+  multisport compare support in this slice.
+- Future work should treat parent compare and child-leg compare as separate
+  design tasks.
+
 ## Compatibility and Migration
 
 - Automatic migration of existing databases is optional scope. If included, app
@@ -712,7 +753,8 @@ Rules:
 - Existing activity metadata remains valid because multisport metadata is added
   under a new `multisport` namespace and existing top-level metadata keys keep
   their current shapes.
-- New segment/lap tables can be empty for existing imports.
+- New segment tables can be empty for existing imports. First-pass lap data
+  remains metadata-backed.
 - Previously imported multisport files cannot be reliably reconstructed from the
   current metadata format, because only one folded session summary is stored.
 - This issue does not add an in-place reimport, replacement, or backfill workflow.
@@ -732,10 +774,10 @@ Recommended first implementation:
 2. Detect multisport FIT files.
 3. Store parent activity plus `activity_segments`.
 4. Assign records to segments.
-5. Store laps in `activity_laps`.
-6. Update insert, rollback, and delete cleanup for segments and laps.
+5. Store segment-tagged laps in `metadata_json.laps`.
+6. Update insert, rollback, and delete cleanup for segments and parent metadata.
 7. Add web API and Tauri IPC support for listing segments and querying records
-   and laps by segment.
+   by segment; filter metadata-backed laps by selected segment.
 8. Add activity detail segment selector.
 9. Prevent overview double-counting.
 

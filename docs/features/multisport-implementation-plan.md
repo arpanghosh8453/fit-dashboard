@@ -17,6 +17,11 @@ The design proposal is in `docs/features/multisport-support.md`.
   results when they match.
 - Do not double-count child rows in overview totals.
 - Preserve existing single-sport behavior.
+- Limit multisport support to FIT files. Garmin Connect FIT downloads from the
+  parent or from selected legs can contain the same full parent multisport FIT
+  payload. Garmin Connect TCX and GPX downloads from selected legs are
+  leg-specific exports, not parent multisport exports, and stay out of scope for
+  multisport detection.
 - Treat automatic database migration as deferred but likely future work. Build
   the first implementation against a fresh schema.
 
@@ -172,6 +177,11 @@ Add typed parser/domain structures for:
 Keep existing `ParsedActivity` behavior for single-sport imports while expanding
 it to carry child data.
 
+Only FIT files participate in multisport detection and segment extraction. TCX and
+GPX parsers keep their existing single-activity behavior. Garmin Connect
+leg-specific TCX/GPX exports should import as ordinary single activities, not as
+multisport parents.
+
 ### 2. Preserve FIT Activity, Sessions, and Laps
 
 Update `fit_parser.rs` to preserve:
@@ -224,7 +234,7 @@ Add schema for:
 - `activities.activity_kind`.
 - `records.segment_id`.
 - `activity_segments`.
-- `activity_laps` is deferred; keep laps in `metadata_json.laps` for MVP.
+- Do not add `activity_laps` in the first pass; keep laps in `metadata_json.laps` for MVP.
 
 Fresh-schema implementation can add these directly in `init_schema` before
 automatic migration work is added.
@@ -249,7 +259,15 @@ Update delete and rollback flow:
 Keep blacklist behavior unchanged: user deletion still adds the file hash to the
 blacklist after DB rows are removed.
 
-### 7. Add Segment and Lap APIs
+Backend validation checkpoint:
+
+- Multisport FIT import stores the parent activity, segments, segment-tagged lap
+  metadata, and segment-scoped records.
+- Deleting a multisport parent removes records, segments, and the parent row.
+- Failed import rollback removes any partial child rows.
+- Single-sport FIT, TCX, and GPX imports keep existing single-activity behavior.
+
+### 7. Add Segment APIs and Record Scoping
 
 Web:
 
@@ -285,7 +303,7 @@ When no segment is selected, fetch parent records and use parent laps.
 When a segment is selected, fetch segment-scoped records and show only laps for
 that segment when lap scoping is available.
 
-### 9. Update Activity List
+### 9a. Add Expandable Activity List Rows
 
 Add expandable parent rows:
 
@@ -294,6 +312,8 @@ Add expandable parent rows:
 - Child row opens the same Individual tab scoped to that segment.
 - Child rows are visually subordinate.
 - Transition rows are visible and selectable, but visually de-emphasized.
+
+### 9b. Add Child Row Search and Filter Behavior
 
 Search/filter behavior:
 
@@ -397,9 +417,16 @@ Filtering nuance:
 
 ### 12. Exports and Compare
 
-Keep export and compare behavior parent-only for the first pass. Child-row export
-and child-row compare are second-pass items tracked in
-`docs/features/multisport-deferred.md`.
+Support export for the selected child leg by reusing the existing export shape
+with segment-scoped records. Single-sport activity export remains unchanged.
+
+Disable or suppress export for multisport parent rows in the first pass unless a
+clearly labelled parent-summary export is designed. Parent-level multisport
+export is deferred in `docs/features/multisport-deferred.md`.
+
+Compare behavior is not explicitly designed in the first pass. Preserve existing
+single-sport compare behavior. Do not add special multisport parent or child
+compare support in this slice.
 
 ### 13. Automatic Migration Deferred
 
@@ -411,6 +438,10 @@ fresh schema.
 
 Backend parser tests:
 
+- TCX and GPX imports keep existing single-activity behavior and do not enter
+  multisport detection.
+- TCX distance correction is tracked separately in issue #29 and is not part
+  of this multisport implementation.
 - Single-sport FIT import remains unchanged.
 - Multisport FIT preserves all sessions.
 - Multisport FIT preserves all laps.

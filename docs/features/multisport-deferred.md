@@ -61,12 +61,23 @@ needed sooner.
 
 ## Export and Compare
 
-- Child-row export.
-  - MVP can remain parent-only if needed.
-  - Future work could export the currently selected child leg records.
-- Child-row compare.
-  - MVP should keep compare parent-only unless child rows are represented clearly
-    in the compare selection UI.
+- Multisport parent export.
+  - Future work should define a deliberate parent export shape, such as parent
+    summary plus child summaries, original FIT download, or a clearly labelled
+    combined telemetry export.
+  - Parent export should not silently reuse a normal single-sport activity export
+    because parent records contain mixed sports and mixed output streams.
+- Multisport parent compare.
+  - Parent compare needs a deliberate design because parent data mixes sports,
+    output streams, and segment semantics.
+  - Future work should decide whether parent compare is disabled, summary-only,
+    or represented by a multisport-specific compare view.
+- Multisport child-leg compare.
+  - Child-leg compare may be able to reuse existing compare behavior, but that is
+    not part of the first-slice design.
+  - Future work should verify whether compare can accept `activity_id` plus
+    `segment_index`, segment labels, segment summaries, and segment-scoped
+    records.
 
 ## Test Fixtures
 
