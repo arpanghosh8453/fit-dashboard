@@ -234,13 +234,65 @@ fn manufacturer_label(name: Option<&str>) -> Option<String> {
     })
 }
 
+fn forerunner_label(name: &str) -> Option<String> {
+    let suffix = name.strip_prefix("fr")?;
+    let mut parts = suffix.split('_');
+    let model_part = parts.next()?;
+    let (model, has_music_suffix) = model_part
+        .strip_suffix('m')
+        .filter(|base| !base.is_empty() && base.chars().all(|c| c.is_ascii_digit()))
+        .map(|base| (base, true))
+        .unwrap_or((model_part, false));
+
+    if model.is_empty() || !model.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    let mut model_suffix = String::new();
+    let mut descriptors: Vec<String> = Vec::new();
+    if has_music_suffix {
+        descriptors.push("Music".to_string());
+    }
+
+    for part in parts {
+        let descriptor = match part {
+            "small" | "s" => {
+                model_suffix.push('S');
+                None
+            }
+            "large" => None,
+            "m" | "music" => Some("Music".to_string()),
+            "lte" => Some("LTE".to_string()),
+            "asia" => Some("Asia".to_string()),
+            "apac" => Some("APAC".to_string()),
+            "japan" => Some("Japan".to_string()),
+            "korea" => Some("Korea".to_string()),
+            "china" => Some("China".to_string()),
+            "sea" => Some("SEA".to_string()),
+            other => Some(humanize_identifier(other)),
+        };
+        if let Some(descriptor) = descriptor {
+            if !descriptors.contains(&descriptor) {
+                descriptors.push(descriptor);
+            }
+        }
+    }
+
+    let suffix = if descriptors.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", descriptors.join(" "))
+    };
+    Some(format!("Forerunner {model}{model_suffix}{suffix}"))
+}
+
 fn product_label(name: Option<&str>) -> Option<String> {
     name.map(|value| match value {
         "edge_1040" => "Edge 1040".to_string(),
         "hrm_200" => "HRM 200".to_string(),
         "assioma_duo" => "Assioma Duo".to_string(),
         "assioma_uno" => "Assioma Uno".to_string(),
-        other => humanize_identifier(other),
+        other => forerunner_label(other).unwrap_or_else(|| humanize_identifier(other)),
     })
 }
 
@@ -504,7 +556,7 @@ impl DeviceAccumulator {
         let manufacturer = resolve_manufacturer(raw.manufacturer_value.as_deref());
         let product = resolve_product(raw.product_field.as_deref(), raw.product_value.as_deref(), &manufacturer);
         let role = role_for(raw, &source_type);
-        let mut device = DeviceMetadata {
+        let device = DeviceMetadata {
             role,
             device_indices: Vec::new(),
             source_type,
@@ -689,6 +741,15 @@ mod tests {
     #[test]
     fn reverse_mapping_rejects_unknown_zero_fallbacks() {
         assert_eq!(reverse_fit_enum::<GarminProduct>("not_a_product"), None);
+    }
+
+    #[test]
+    fn garmin_forerunner_labels_expand_fr_prefix() {
+        assert_eq!(product_label(Some("fr255")).as_deref(), Some("Forerunner 255"));
+        assert_eq!(
+            product_label(Some("fr255_small_music")).as_deref(),
+            Some("Forerunner 255S Music")
+        );
     }
 
     #[test]

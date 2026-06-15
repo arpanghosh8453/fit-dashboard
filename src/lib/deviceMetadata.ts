@@ -126,14 +126,44 @@ function firstDeviceTypeLabel(device: DeviceMetadata): string | null {
     ?? null;
 }
 
+function forerunnerLabel(value?: string | null): string | null {
+  const match = value?.match(/^fr(\d+)(m)?(?:_(.*))?$/i);
+  if (!match) return null;
+
+  const [, model, musicSuffix, rawRest] = match;
+  let modelSuffix = "";
+  const descriptors = new Set<string>();
+  if (musicSuffix) descriptors.add("Music");
+
+  for (const part of rawRest?.split("_").filter(Boolean) ?? []) {
+    const lower = part.toLowerCase();
+    if (lower === "small" || lower === "s") modelSuffix += "S";
+    else if (lower === "large") continue;
+    else if (lower === "m" || lower === "music") descriptors.add("Music");
+    else if (lower === "lte") descriptors.add("LTE");
+    else if (lower === "apac") descriptors.add("APAC");
+    else if (lower === "sea") descriptors.add("SEA");
+    else descriptors.add(labelFromIdentifier(lower) ?? part);
+  }
+
+  const suffix = descriptors.size > 0 ? ` ${Array.from(descriptors).join(" ")}` : "";
+  return `Forerunner ${model}${modelSuffix}${suffix}`;
+}
+
+function formatProductLabel(product?: ProductMetadata | null): string | null {
+  return forerunnerLabel(product?.name)
+    ?? product?.label
+    ?? labelFromIdentifier(product?.name)
+    ?? (typeof product?.code === "number" ? `Product ${product.code}` : null);
+}
+
 export function formatDeviceLabel(device: DeviceMetadata): string {
   const manufacturer = device.manufacturer?.label
     ?? labelFromIdentifier(device.manufacturer?.name)
     ?? "";
-  const product = device.product?.label
-    ?? labelFromIdentifier(device.product?.name)
+  const product = formatProductLabel(device.product)
     ?? firstDeviceTypeLabel(device)
-    ?? (typeof device.product?.code === "number" ? `Product ${device.product.code}` : "");
+    ?? "";
   return [manufacturer, product].filter(Boolean).join(" ").trim()
     || firstDeviceTypeLabel(device)
     || "Device";
