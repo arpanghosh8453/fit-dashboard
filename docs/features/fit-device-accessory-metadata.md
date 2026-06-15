@@ -51,6 +51,13 @@ compatibility. Keep the existing top-level `metadata_json.file_id` object for
 current readers, but enrich `metadata_json.device_info` with a versioned full
 list of devices discovered in the FIT file.
 
+Persist raw and FIT-profile-derived facts in `metadata_json`: numeric codes,
+SDK enum names when available, source type, device type, manufacturer, serial
+number, identifiers, and timestamps. Product substitutions and user-facing
+labels that are not directly provided by the FIT profile should be derived in
+the UI/export layer so improved lookup tables can apply to old rows without a
+metadata backfill.
+
 Suggested metadata shape:
 
 ```json
@@ -119,9 +126,9 @@ Suggested metadata shape:
         "product": {
           "field": "garmin_product",
           "code": 4606,
-          "name": "hrm_200",
-          "label": "HRM 200",
-          "lookup_source": "app_overlay"
+          "name": null,
+          "label": null,
+          "lookup_source": "raw"
         },
         "serial_number": 3618094325,
         "software_version": "5.40",
@@ -198,19 +205,21 @@ Suggested metadata shape:
 }
 ```
 
-Use `name` for stable enum-style identifiers and `label` for human display text.
-Use `code` for the raw numeric FIT value when available. The `fitparser` API
-returns decoded strings for many known profile values and does not expose a
-separate raw value, so implementation should reverse-map known decoded strings
-through the generated FIT enum helpers. Reverse mapping must use a round-trip
-guard, such as checking that converting the numeric enum back to a string matches
-the original decoded name, to avoid treating unknown strings as valid code `0`.
-Preserve numeric codes when they are already present, especially unresolved
-products such as Garmin product `4606` or Magene product `3`.
+Use `code` for the raw numeric FIT value when available. Use `name` only for
+stable enum-style identifiers supplied by the FIT profile or recovered through a
+guarded reverse lookup. The `fitparser` API returns decoded strings for many
+known profile values and does not expose a separate raw value, so implementation
+should reverse-map known decoded strings through the generated FIT enum helpers.
+Reverse mapping must use a round-trip guard, such as checking that converting
+the numeric enum back to a string matches the original decoded name, to avoid
+treating unknown strings as valid code `0`. Preserve numeric codes when they are
+already present, especially unresolved products such as Garmin product `4606`,
+Garmin product `3592`, or Magene product `3`.
 
-Product labels should omit the manufacturer because manufacturer is stored in a
-separate structured field. The UI can compose full labels such as `Garmin HRM
-200` from `manufacturer.label` and `product.label`.
+`label` values in persisted metadata are compatibility/display hints, not the
+source of truth. New manual substitutions should not be written as persisted
+product names or labels. The UI can compose full labels such as `Garmin HRM 200`
+from manufacturer facts, product codes, source type, and device type.
 
 The `devices[]` entries represent physical devices, not raw FIT records. When a
 single physical accessory appears with multiple functions, such as radar and
@@ -263,32 +272,43 @@ manufacturer `favero_electronics` with product code `12` resolves to
 `assioma_duo`, while the same product code would mean something different under
 another manufacturer.
 
-Supplement FIT profile lookups with a small app-owned overlay table for products
-that the current SDK does not name yet. The overlay key must be exact:
+Supplement FIT profile lookups with a small app-owned display lookup table for
+products that the current SDK does not name yet. These entries should be applied
+by the UI/export resolver, not by rewriting persisted product names. The display
+lookup key should be exact and may include context when a code is ambiguous:
 
 ```text
-manufacturer + product_field + product_code
+manufacturer + product_field + product_code + source_type + device_type
 ```
 
-Example overlay entry:
+Example display lookup entries:
 
 ```text
-garmin + garmin_product + 4606 -> name: hrm_200, label: HRM 200
+garmin + garmin_product + 4606 + any + heart_rate -> HRM 200
+garmin + garmin_product/product + 255 + antplus + heart_rate -> HRM 200
+garmin + garmin_product/product + 3592 + antplus + bike_radar/bike_light_main -> Varia RTL515
 ```
 
-Resolution order:
+Persistence resolution order:
 
 1. Use the FIT SDK/profile result when it provides a usable product name. Populate
    `code` by reverse-mapping decoded strings through the matching generated enum
    helper when the raw numeric value is not exposed directly.
-2. Use the app overlay when the SDK result is numeric, missing, or unknown. Store
-   the raw numeric `code` that triggered the overlay.
-3. Preserve the raw product code with `name: null`, `label: null`, and
-   `lookup_source: "raw"` when neither lookup resolves it.
+2. Preserve the raw product code with `name: null`, `label: null`, and
+   `lookup_source: "raw"` when the FIT profile does not resolve it.
+3. Do not persist app-owned display substitutions as authoritative product
+   names. Keep raw product codes even when a display lookup succeeds.
 
-Overlay entries fill SDK gaps by default; they should not override a usable SDK
-name unless a future entry explicitly opts into that behaviour. Keep raw product
-codes even when a lookup succeeds.
+Display/export resolution order:
+
+1. Use an app-owned display lookup when a raw product code plus context identifies
+   a more useful device name.
+2. Use the FIT SDK/profile product name when available.
+3. Fall back to manufacturer plus device type.
+4. Fall back to raw product code.
+
+Display lookup entries fill SDK gaps by default; they should not override a
+usable SDK name unless a future entry explicitly opts into that behaviour.
 
 Reverse mapping helpers should be centralized and covered by tests. Test cases
 should include known values with code `0`, unknown strings that would otherwise
@@ -301,21 +321,29 @@ Product metadata fields:
   or generic `product`
 - `code`: raw numeric product code, from the parser when exposed directly or from
   guarded reverse mapping when the parser exposes a decoded string
-- `name`: stable enum-style identifier, such as `hrm_200`
-- `label`: human product label without manufacturer, such as `HRM 200`
-- `lookup_source`: `fit_profile`, `app_overlay`, or `raw`
+- `name`: stable FIT-profile enum-style identifier when known, such as
+  `assioma_duo`; unresolved product codes should keep `name: null`
+- `label`: optional compatibility/display hint; manual substitutions should be
+  derived in UI/export rather than persisted here
+- `lookup_source`: `fit_profile` or `raw`
 
 Display fallback order for a full accessory label:
 
-1. `manufacturer.label` + `product.label`
-2. `manufacturer.label` + device type label
+1. derived manufacturer label + derived product label from the display lookup or
+   FIT profile name
+2. derived manufacturer label + device type label
 3. device type label
 4. `Unknown accessory`
 
 Examples from observed files:
 
-- Garmin product code `4606` with BLE type `heart_rate` resolves through the app
-  overlay to `Garmin HRM 200`.
+- Garmin product code `4606` with BLE type `heart_rate` remains raw product code
+  metadata, but displays as `Garmin HRM 200`.
+- Garmin product code `255` with ANT+ type `heart_rate` may be decoded by the SDK
+  as `OHR`; when it is an external ANT+/Bluetooth heart-rate accessory, display
+  it as `Garmin HRM 200`.
+- Garmin product code `3592` with ANT+ `bike_radar` and `bike_light_main` records
+  remains raw product code metadata, but displays as `Garmin Varia RTL515`.
 - Magene product code `3` with ANT+ type `bike_speed` remains raw product code
   metadata, but displays as `Magene bike speed sensor`.
 - Magene product code `3` with ANT+ type `bike_cadence` remains raw product code
@@ -377,8 +405,10 @@ accessories are present, the hover state should stay minimal rather than showing
 an empty accessory section.
 
 JSON export should include the enriched device metadata while preserving the
-existing `activity.device` field. Add a root-level `deviceInfo` object to the
-export and add a device metadata version to `_exportInfo`:
+existing `activity.device` field. Device entries should include raw/parsed
+metadata plus a derived `display` object so exports are readable without making
+friendly labels the persisted source of truth. Add a root-level `deviceInfo`
+object to the export and add a device metadata version to `_exportInfo`:
 
 ```json
 {
@@ -391,7 +421,17 @@ export and add a device metadata version to `_exportInfo`:
   },
   "deviceInfo": {
     "sourceSupport": "full",
-    "primary": [],
+    "primary": [
+      {
+        "role": "primary",
+        "display": {
+          "name": "Garmin Edge 1040",
+          "manufacturer": "Garmin",
+          "product": "Edge 1040",
+          "deviceType": null
+        }
+      }
+    ],
     "accessories": [],
     "internal": []
   }

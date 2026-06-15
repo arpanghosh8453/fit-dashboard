@@ -126,6 +126,30 @@ function firstDeviceTypeLabel(device: DeviceMetadata): string | null {
     ?? null;
 }
 
+function hasDeviceType(device: DeviceMetadata, names: string[], codes: number[]): boolean {
+  return (device.device_types ?? []).some((type) => {
+    const name = type.name?.toLowerCase();
+    return (name ? names.includes(name) : false)
+      || (typeof type.code === "number" ? codes.includes(type.code) : false);
+  });
+}
+
+function isExternalSource(device: DeviceMetadata): boolean {
+  return ["ant", "antplus", "bluetooth", "bluetooth_low_energy"].includes(
+    device.source_type?.name?.toLowerCase() ?? ""
+  );
+}
+
+function isGarmin(device: DeviceMetadata): boolean {
+  return device.manufacturer?.name?.toLowerCase() === "garmin" || device.manufacturer?.code === 1;
+}
+
+function displayManufacturerLabel(device: DeviceMetadata): string | null {
+  return device.manufacturer?.label
+    ?? labelFromIdentifier(device.manufacturer?.name)
+    ?? null;
+}
+
 function forerunnerLabel(value?: string | null): string | null {
   const match = value?.match(/^fr(\d+)(m)?(?:_(.*))?$/i);
   if (!match) return null;
@@ -150,7 +174,28 @@ function forerunnerLabel(value?: string | null): string | null {
   return `Forerunner ${model}${modelSuffix}${suffix}`;
 }
 
-function formatProductLabel(product?: ProductMetadata | null): string | null {
+function derivedProductLabel(device: DeviceMetadata): string | null {
+  const product = device.product;
+  if (isGarmin(device)) {
+    if (
+      product?.code === 3592
+      && hasDeviceType(device, ["bike_light_main", "bike_light_shared", "bike_radar"], [35, 40])
+    ) {
+      return "Varia RTL515";
+    }
+
+    if (
+      (product?.code === 4606 || product?.name === "hrm_200")
+      || (
+        product?.code === 255
+        && isExternalSource(device)
+        && hasDeviceType(device, ["heart_rate"], [120])
+      )
+    ) {
+      return "HRM 200";
+    }
+  }
+
   return forerunnerLabel(product?.name)
     ?? product?.label
     ?? labelFromIdentifier(product?.name)
@@ -158,10 +203,8 @@ function formatProductLabel(product?: ProductMetadata | null): string | null {
 }
 
 export function formatDeviceLabel(device: DeviceMetadata): string {
-  const manufacturer = device.manufacturer?.label
-    ?? labelFromIdentifier(device.manufacturer?.name)
-    ?? "";
-  const product = formatProductLabel(device.product)
+  const manufacturer = displayManufacturerLabel(device) ?? "";
+  const product = derivedProductLabel(device)
     ?? firstDeviceTypeLabel(device)
     ?? "";
   return [manufacturer, product].filter(Boolean).join(" ").trim()
@@ -206,6 +249,18 @@ export function getPrimaryDeviceLabel(
   return activity?.device || metadata?.file_id?.product_name || "";
 }
 
+function buildExportDevice(device: DeviceMetadata) {
+  return {
+    ...device,
+    display: {
+      name: formatDeviceLabel(device),
+      manufacturer: displayManufacturerLabel(device),
+      product: derivedProductLabel(device),
+      deviceType: firstDeviceTypeLabel(device),
+    },
+  };
+}
+
 export function buildExportDeviceInfo(metadata: ActivityMetadata | null) {
   const info = metadata?.device_info;
   if (!info) return null;
@@ -215,10 +270,10 @@ export function buildExportDeviceInfo(metadata: ActivityMetadata | null) {
     schemaVersion: info.schema_version ?? null,
     sourceSupport: info.source_support ?? null,
     decodedFileId: info.decoded_file_id ?? null,
-    primary: devices.filter((device) => device.role === "primary"),
-    accessories: getAccessoryDevices(metadata),
-    internal: devices.filter((device) => device.role === "internal"),
-    devices,
+    primary: devices.filter((device) => device.role === "primary").map(buildExportDevice),
+    accessories: getAccessoryDevices(metadata).map(buildExportDevice),
+    internal: devices.filter((device) => device.role === "internal").map(buildExportDevice),
+    devices: devices.map(buildExportDevice),
     rawDeviceInfoRecordCount: info.raw_device_info_record_count ?? null,
   };
 }

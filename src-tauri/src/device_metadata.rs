@@ -341,19 +341,6 @@ pub fn resolve_manufacturer(raw: Option<&str>) -> CodeNameLabel {
     CodeNameLabel { code, name, label }
 }
 
-fn overlay_product(
-    manufacturer_name: Option<&str>,
-    field: Option<&str>,
-    code: Option<i64>,
-) -> Option<(&'static str, &'static str)> {
-    match (manufacturer_name, field, code) {
-        (Some("garmin"), Some("garmin_product" | "product"), Some(4606)) => {
-            Some(("hrm_200", "HRM 200"))
-        }
-        _ => None,
-    }
-}
-
 pub fn resolve_product(
     field: Option<&str>,
     raw: Option<&str>,
@@ -375,16 +362,6 @@ pub fn resolve_product(
             }
             _ => None,
         });
-
-    if let Some((name, label)) = overlay_product(manufacturer.name.as_deref(), field_name, code) {
-        return ProductMetadata {
-            field,
-            code,
-            name: Some(name.to_string()),
-            label: Some(label.to_string()),
-            lookup_source: "app_overlay".to_string(),
-        };
-    }
 
     let name = raw_name.or_else(|| match field_name {
         Some("garmin_product") => code.and_then(enum_name_from_code::<GarminProduct>),
@@ -464,6 +441,34 @@ fn is_creator_index(value: Option<&str>, code: Option<i64>) -> bool {
         .map(|v| v.eq_ignore_ascii_case("creator"))
         .unwrap_or(false)
         || code == Some(0)
+}
+
+fn device_index_identity(raw: &RawDeviceInfo) -> Option<String> {
+    raw.device_index_code
+        .map(|code| code.to_string())
+        .or_else(|| raw.device_index_value.as_deref().and_then(clean_name))
+}
+
+fn product_identity(product: &ProductMetadata) -> Option<String> {
+    product
+        .code
+        .map(|code| code.to_string())
+        .or_else(|| product.name.clone())
+}
+
+fn serial_index_signature(
+    raw: &RawDeviceInfo,
+    source_type: &CodeNameLabel,
+    product: &ProductMetadata,
+    role: &str,
+) -> Option<String> {
+    Some(format!(
+        "{}:{}:{}:{}",
+        role,
+        source_type.name.as_deref().unwrap_or(""),
+        product_identity(product)?,
+        device_index_identity(raw)?
+    ))
 }
 
 fn role_for(raw: &RawDeviceInfo, source_type: &CodeNameLabel) -> String {
@@ -692,13 +697,47 @@ fn display_sort_label(device: &DeviceMetadata) -> String {
 }
 
 pub fn build_devices(raw_records: &[RawDeviceInfo]) -> Vec<DeviceMetadata> {
-    let mut devices: BTreeMap<String, DeviceAccumulator> = BTreeMap::new();
+    let mut serial_keys_by_index: BTreeMap<String, Option<String>> = BTreeMap::new();
     for raw in raw_records {
+        if raw.serial_number.is_none() {
+            continue;
+        }
+
         let source_type = resolve_source_type(raw.source_type_value.as_deref(), raw.source_type_code);
         let manufacturer = resolve_manufacturer(raw.manufacturer_value.as_deref());
         let product = resolve_product(raw.product_field.as_deref(), raw.product_value.as_deref(), &manufacturer);
         let role = role_for(raw, &source_type);
-        let key = device_identity_key(raw, &source_type, &manufacturer, &product, &role);
+        if let Some(signature) = serial_index_signature(raw, &source_type, &product, &role) {
+            let key = device_identity_key(raw, &source_type, &manufacturer, &product, &role);
+            serial_keys_by_index
+                .entry(signature)
+                .and_modify(|existing| {
+                    if existing.as_ref() != Some(&key) {
+                        *existing = None;
+                    }
+                })
+                .or_insert_with(|| Some(key));
+        }
+    }
+
+    let mut devices: BTreeMap<String, DeviceAccumulator> = BTreeMap::new();
+    for raw in raw_records
+        .iter()
+        .filter(|raw| raw.serial_number.is_some())
+        .chain(raw_records.iter().filter(|raw| raw.serial_number.is_none()))
+    {
+        let source_type = resolve_source_type(raw.source_type_value.as_deref(), raw.source_type_code);
+        let manufacturer = resolve_manufacturer(raw.manufacturer_value.as_deref());
+        let product = resolve_product(raw.product_field.as_deref(), raw.product_value.as_deref(), &manufacturer);
+        let role = role_for(raw, &source_type);
+        let mut key = device_identity_key(raw, &source_type, &manufacturer, &product, &role);
+        if raw.serial_number.is_none() {
+            if let Some(signature) = serial_index_signature(raw, &source_type, &product, &role) {
+                if let Some(Some(serial_key)) = serial_keys_by_index.get(&signature) {
+                    key = serial_key.clone();
+                }
+            }
+        }
         devices
             .entry(key)
             .and_modify(|acc| acc.merge(raw))
@@ -753,13 +792,13 @@ mod tests {
     }
 
     #[test]
-    fn garmin_hrm_200_overlay_fills_sdk_gap() {
+    fn unresolved_garmin_hrm_200_code_stays_raw_for_display_layer() {
         let manufacturer = resolve_manufacturer(Some("garmin"));
         let product = resolve_product(Some("garmin_product"), Some("4606"), &manufacturer);
         assert_eq!(product.code, Some(4606));
-        assert_eq!(product.name.as_deref(), Some("hrm_200"));
-        assert_eq!(product.label.as_deref(), Some("HRM 200"));
-        assert_eq!(product.lookup_source, "app_overlay");
+        assert_eq!(product.name, None);
+        assert_eq!(product.label, None);
+        assert_eq!(product.lookup_source, "raw");
     }
 
     #[test]
@@ -800,5 +839,52 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(names.contains(&Some("bike_light_main")));
         assert!(names.contains(&Some("bike_radar")));
+    }
+
+    #[test]
+    fn missing_serial_records_merge_into_serial_device_for_same_index_and_product() {
+        let serial_base = RawDeviceInfo {
+            source_type_value: Some("antplus".to_string()),
+            source_type_code: Some(1),
+            manufacturer_value: Some("garmin".to_string()),
+            product_field: Some("garmin_product".to_string()),
+            product_value: Some("3592".to_string()),
+            serial_number: Some(123),
+            ..Default::default()
+        };
+
+        let mut light = serial_base.clone();
+        light.device_index_value = Some("5".to_string());
+        light.device_index_code = Some(5);
+        light.device_types.push(RawDeviceType {
+            field: "antplus_device_type".to_string(),
+            value: "bike_light_main".to_string(),
+            code: Some(35),
+        });
+
+        let mut light_without_serial = light.clone();
+        light_without_serial.manufacturer_value = None;
+        light_without_serial.product_field = Some("product".to_string());
+        light_without_serial.serial_number = None;
+        light_without_serial.battery_level = Some(74.0);
+
+        let mut radar = serial_base;
+        radar.device_index_value = Some("6".to_string());
+        radar.device_index_code = Some(6);
+        radar.device_types.push(RawDeviceType {
+            field: "antplus_device_type".to_string(),
+            value: "bike_radar".to_string(),
+            code: Some(40),
+        });
+
+        let mut radar_without_serial = radar.clone();
+        radar_without_serial.serial_number = None;
+        radar_without_serial.battery_level = Some(73.0);
+
+        let devices = build_devices(&[light_without_serial, radar_without_serial, light, radar]);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].serial_number, Some(123));
+        assert_eq!(devices[0].device_indices, vec![JsonValue::from(5), JsonValue::from(6)]);
+        assert_eq!(devices[0].battery_level, Some(73.0));
     }
 }
