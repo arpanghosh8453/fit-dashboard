@@ -111,6 +111,8 @@
   "detail.calories": "Calories",
   "detail.laps": "Laps",
   "detail.smoothGraphs": "Smooth graphs",
+  "detail.chartXAxis": "Chart x-axis",
+  "detail.distanceAxisUnavailable": "Distance axis unavailable for this activity",
   "detail.resetZoom": "Reset Zoom",
   "detail.heartRateAndPace": "Heart Rate and Pace",
   "detail.selectActivity": "Select an activity from the sidebar to inspect individual telemetry.",

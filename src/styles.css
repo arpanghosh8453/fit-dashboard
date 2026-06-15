@@ -1373,6 +1373,44 @@ button:focus-visible {
   margin: 0;
 }
 
+.detail-axis-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input-bg);
+}
+
+.detail-axis-toggle button {
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0.28rem 0.55rem;
+  transition: all 160ms ease;
+}
+
+.detail-axis-toggle button.active {
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.detail-axis-toggle button:not(.active):not(:disabled):hover {
+  color: var(--text);
+  background: var(--accent-glow);
+}
+
+.detail-axis-toggle button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

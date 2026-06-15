@@ -3,13 +3,21 @@ import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
 import { buildHeartRateZones } from "../lib/hrZones";
 import { applyRollingAverageSeries, getDynamicSmoothingWindow } from "../lib/chartSmoothing";
-import { convertDistanceMeters, convertPaceMinPerKm, distanceLabel, paceLabel, type DistanceUnit } from "../lib/units";
+import { convertPaceMinPerKm, paceLabel, type DistanceUnit } from "../lib/units";
+import {
+  buildLapMarkers,
+  buildTelemetryPoints,
+  formatTelemetryTooltipHeader,
+  formatTelemetryXAxisTick,
+  type TelemetryXAxisMode,
+} from "../lib/telemetryAxis";
 import { useTranslation } from "../lib/i18n";
 
 type Props = {
   records: RecordPoint[];
   theme: "light" | "dark";
   distanceUnit: DistanceUnit;
+  xAxisMode?: TelemetryXAxisMode;
   heartRateZoneBoundsBpm?: number[];
   zoomRange?: { start: number; end: number } | null;
   onZoomChange?: (range: { start: number; end: number }) => void;
@@ -17,10 +25,17 @@ type Props = {
   smoothGraphs?: boolean;
 };
 
+type SeriesRow = [number, number | null, number, number, number | null];
+
+function isSeriesRow(row: [number | null, number | null, number, number, number | null]): row is SeriesRow {
+  return typeof row[0] === "number" && Number.isFinite(row[0]);
+}
+
 export function ActivityChart({
   records,
   theme,
   distanceUnit,
+  xAxisMode = "time",
   heartRateZoneBoundsBpm,
   zoomRange,
   onZoomChange,
@@ -31,59 +46,35 @@ export function ActivityChart({
   const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
   const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
   const { t } = useTranslation();
-  
-  // Format MM:SS or HH:MM:SS
-  const formatRelTime = (ms: number) => {
-    const totalSec = Math.floor(Math.max(0, ms) / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-    }
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
 
-  const formatAbsTime = (relMs: number) => {
-    const absolute = new Date(t0 + Math.max(0, relMs));
-    const hh = String(absolute.getHours()).padStart(2, "0");
-    const mm = String(absolute.getMinutes()).padStart(2, "0");
-    const ss = String(absolute.getSeconds()).padStart(2, "0");
-    return `${hh}:${mm}:${ss}`;
-  };
-
-  const formatTooltipHeader = (relMs: number) =>
-    `<div style="display:flex;align-items:center;gap:6px;"><strong>${formatRelTime(relMs)}</strong><span style="display:inline-flex;align-items:center;border-radius:999px;padding:1px 6px;font-size:11px;background:rgba(148,163,184,0.22);">${formatAbsTime(relMs)}</span></div>`;
+  const telemetryPoints = buildTelemetryPoints(records, t0, xAxisMode, distanceUnit);
+  const formatTooltipHeader = (relMs: number, distanceMeters: number | null) =>
+    formatTelemetryTooltipHeader(xAxisMode, t0, relMs, distanceMeters, distanceUnit);
 
   const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
-  const hrSeriesData = records.map((r) => [r.timestamp_ms - t0, r.heart_rate ?? null, r.timestamp_ms, typeof r.distance_m === "number" ? r.distance_m / 1000 : null]);
-  const paceSeriesData = records.map((r, i) => {
-    const relMs = r.timestamp_ms - t0;
-    const prev = i > 0 ? records[i - 1] : undefined;
-    const dtS = prev ? (r.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
-    const derivedSpeed =
-      (!r.speed_m_s && prev && typeof r.distance_m === "number" && typeof prev.distance_m === "number" && dtS > 0)
-        ? Math.max(0, (r.distance_m - prev.distance_m) / dtS)
-        : undefined;
-    const speedMs = r.speed_m_s ?? derivedSpeed;
-    const paceMinPerKm = speedMs && speedMs > 0 ? 1000 / (speedMs * 60) : null;
-    const paceMinPerUnit = paceMinPerKm == null ? null : convertPaceMinPerKm(paceMinPerKm, distanceUnit);
-    return [relMs, paceMinPerUnit, r.timestamp_ms];
-  });
+  const hrSeriesData = telemetryPoints
+    .map((point, i) => [point.x, records[i].heart_rate ?? null, point.relMs, point.timestampMs, point.distanceMeters] as [number | null, number | null, number, number, number | null])
+    .filter(isSeriesRow);
+  const paceSeriesData = telemetryPoints
+    .map((point, i) => {
+      const record = records[i];
+      const prev = i > 0 ? records[i - 1] : undefined;
+      const dtS = prev ? (record.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
+      const derivedSpeed =
+        (!record.speed_m_s && prev && typeof record.distance_m === "number" && typeof prev.distance_m === "number" && dtS > 0)
+          ? Math.max(0, (record.distance_m - prev.distance_m) / dtS)
+          : undefined;
+      const speedMs = record.speed_m_s ?? derivedSpeed;
+      const paceMinPerKm = speedMs && speedMs > 0 ? 1000 / (speedMs * 60) : null;
+      const paceMinPerUnit = paceMinPerKm == null ? null : convertPaceMinPerKm(paceMinPerKm, distanceUnit);
+      return [point.x, paceMinPerUnit, point.relMs, point.timestampMs, point.distanceMeters] as [number | null, number | null, number, number, number | null];
+    })
+    .filter(isSeriesRow);
 
   const hrSeriesSmoothed = smoothGraphs ? applyRollingAverageSeries(hrSeriesData, 1, smoothWindow) : hrSeriesData;
   const paceSeriesSmoothed = smoothGraphs ? applyRollingAverageSeries(paceSeriesData, 1, smoothWindow) : paceSeriesData;
 
-  const lapMarkers = lapTimestampsUtc
-    .slice(1)
-    .map((ts, idx) => {
-      const parsed = Date.parse(ts);
-      if (!Number.isFinite(parsed)) return null;
-      const relMs = parsed - t0;
-      if (relMs < 0) return null;
-      return { xAxis: relMs, name: `Lap ${idx + 1}` };
-    })
-    .filter((m): m is { xAxis: number; name: string } => m !== null);
+  const lapMarkers = buildLapMarkers(records, lapTimestampsUtc, t0, xAxisMode, distanceUnit);
 
   const isDark = theme === "dark";
   const axisColor = isDark ? "#8899b8" : "#64748b";
@@ -91,6 +82,17 @@ export function ActivityChart({
   const tooltipBg = isDark ? "rgba(14, 22, 45, 0.95)" : "rgba(255, 255, 255, 0.95)";
   const tooltipBorder = isDark ? "rgba(100, 140, 220, 0.2)" : "rgba(0, 0, 0, 0.08)";
   const tooltipText = isDark ? "#e2e8f4" : "#0f172a";
+
+  const sharedXAxis = {
+    type: "value",
+    axisLabel: {
+      color: axisColor,
+      fontSize: 11,
+      formatter: (val: number) => formatTelemetryXAxisTick(val, xAxisMode, distanceUnit),
+    },
+    axisLine: { lineStyle: { color: gridLine } },
+    splitLine: { show: false },
+  };
 
   const hrOption = {
     tooltip: {
@@ -100,17 +102,13 @@ export function ActivityChart({
       textStyle: { color: tooltipText, fontSize: 12 },
       formatter: (params: any) => {
         const p = params[0];
-        const relTime = Number(p.value[0] ?? 0);
-        let html = formatTooltipHeader(relTime);
+        const relTime = Number(p.value[2] ?? 0);
+        const distanceMeters = p?.value?.[4] as number | null | undefined;
+        let html = formatTooltipHeader(relTime, distanceMeters ?? null);
         for (const s of params) {
           if (s.value[1] !== null && s.value[1] !== undefined) {
             html += `<div>${s.marker} ${s.seriesName}: <strong>${s.value[1]}</strong></div>`;
           }
-        }
-        const distanceKm = p?.value?.[3] as number | null | undefined;
-        if (distanceKm !== null && distanceKm !== undefined) {
-          const distanceInUnit = convertDistanceMeters(Number(distanceKm) * 1000, distanceUnit);
-          html += `<div style="margin-top:2px;">${t("chart.distance")}: <strong>${distanceInUnit.toFixed(2)} ${distanceLabel(distanceUnit)}</strong></div>`;
         }
         return html;
       }
@@ -135,16 +133,7 @@ export function ActivityChart({
       }),
     },
     grid: { left: 48, right: 16, top: 36, bottom: 38 },
-    xAxis: {
-      type: "value",
-      axisLabel: {
-        color: axisColor,
-        fontSize: 11,
-        formatter: (val: number) => formatRelTime(val)
-      },
-      axisLine: { lineStyle: { color: gridLine } },
-      splitLine: { show: false },
-    },
+    xAxis: sharedXAxis,
     yAxis: {
       type: "value",
       name: "bpm",
@@ -191,8 +180,9 @@ export function ActivityChart({
       textStyle: { color: tooltipText, fontSize: 12 },
       formatter: (params: any) => {
         const p = params[0];
-        const relTime = Number(p.value[0] ?? 0);
-        let html = formatTooltipHeader(relTime);
+        const relTime = Number(p.value[2] ?? 0);
+        const distanceMeters = p?.value?.[4] as number | null | undefined;
+        let html = formatTooltipHeader(relTime, distanceMeters ?? null);
         for (const s of params) {
           if (s.value[1] !== null && s.value[1] !== undefined) {
             const pace = Number(s.value[1]);
@@ -210,16 +200,7 @@ export function ActivityChart({
       top: 0,
     },
     grid: { left: 48, right: 16, top: 36, bottom: 38 },
-    xAxis: {
-      type: "value",
-      axisLabel: {
-        color: axisColor,
-        fontSize: 11,
-        formatter: (val: number) => formatRelTime(val)
-      },
-      axisLine: { lineStyle: { color: gridLine } },
-      splitLine: { show: false },
-    },
+    xAxis: sharedXAxis,
     yAxis: {
       type: "value",
       name: paceLabel(distanceUnit),

@@ -158,4 +158,3 @@ Manual validation should cover:
 - Reset Zoom works in both modes.
 - Smooth graphs still applies in both modes.
 - The effort heatmap remains time-binned and is unaffected by the toggle.
-
