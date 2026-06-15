@@ -2,6 +2,7 @@
 
 mod auth;
 mod database;
+mod device_metadata;
 mod fit_parser;
 mod models;
 #[cfg(all(feature = "web", not(feature = "tauri-app")))]
