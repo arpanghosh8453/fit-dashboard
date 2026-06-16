@@ -46,6 +46,35 @@ fn value_string(v: &Value) -> String {
     }
 }
 
+fn clean_fit_label(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let lower = trimmed.to_lowercase();
+    if trimmed.is_empty()
+        || trimmed.chars().all(|c| c.is_ascii_digit())
+        || matches!(lower.as_str(), "unknown" | "invalid")
+        || lower.starts_with("unknown_variant_")
+    {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn unresolved_fit_value(value: &str) -> bool {
+    clean_fit_label(value).is_none()
+}
+
+fn canonical_fit_sport(session_sport: &str, sport_profile_name: Option<&str>) -> String {
+    let sport = session_sport.trim().to_lowercase();
+    if unresolved_fit_value(&sport) {
+        if let Some(profile_name) = sport_profile_name.and_then(clean_fit_label) {
+            return profile_name.to_lowercase();
+        }
+        return "unknown".to_string();
+    }
+    sport
+}
+
 fn combine_device_name(
     product_name: Option<String>,
     manufacturer: Option<String>,
@@ -286,6 +315,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
 
     let mut points: Vec<RecordPoint> = Vec::new();
     let mut sport = String::from("unknown");
+    let mut session_sport_raw_code: Option<i64> = None;
+    let mut sport_profile_name: Option<String> = None;
     let mut device = String::new();
     let mut file_id_product_name: Option<String> = None;
     let mut file_id_manufacturer: Option<String> = None;
@@ -376,7 +407,12 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         } else if rec.kind() == MesgNum::Session {
             for field in rec.fields() {
                 match field.name() {
-                    "sport" => sport = value_string(field.value()).to_lowercase(),
+                    "sport" => {
+                        let value = value_string(field.value());
+                        session_sport_raw_code = value_i64(field.value())
+                            .or_else(|| value.trim().parse().ok());
+                        sport = value.to_lowercase();
+                    }
                     "beginning_body_battery" | "start_body_battery" => {
                         session_beginning_body_battery = value_i64(field.value())
                     }
@@ -391,6 +427,13 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "total_distance" => session_total_distance_m = value_f64(field.value()),
                     "total_calories" => session_total_calories = value_i64(field.value()),
                     _ => {}
+                }
+            }
+        } else if rec.kind() == MesgNum::Sport {
+            for field in rec.fields() {
+                if field.name() == "name" && sport_profile_name.is_none() {
+                    let value = value_string(field.value());
+                    sport_profile_name = clean_fit_label(&value);
                 }
             }
         } else if rec.kind() == MesgNum::DeviceInfo {
@@ -634,11 +677,14 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let resolved_serial_number = file_id_serial_number
         .or(device_info_creator_serial)
         .or(device_info_fallback_serial);
+    sport = canonical_fit_sport(&sport, sport_profile_name.as_deref());
 
     let metadata_json = serde_json::json!({
         "record_count": points.len(),
         "device": device,
         "sport": sport,
+        "raw_sport_code": session_sport_raw_code,
+        "sport_profile_name": sport_profile_name,
         "source_format": "fit",
         "file_id": {
             "product_name": file_id_combined_name,
@@ -655,6 +701,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         },
         "heart_rate_zone_bounds_bpm": heart_rate_zone_bounds_bpm,
         "session": {
+            "raw_sport_code": session_sport_raw_code,
             "beginning_body_battery": session_beginning_body_battery,
             "ending_body_battery": session_ending_body_battery,
             "max_heart_rate": session_max_heart_rate,
@@ -978,4 +1025,24 @@ fn parse_gpx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         records: points,
         metadata_json,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sport_profile_name_resolves_numeric_session_sport() {
+        assert_eq!(canonical_fit_sport("52", Some("Stopwatch")), "stopwatch");
+    }
+
+    #[test]
+    fn numeric_session_sport_without_profile_name_becomes_unknown() {
+        assert_eq!(canonical_fit_sport("52", None), "unknown");
+    }
+
+    #[test]
+    fn profile_name_does_not_override_known_session_sport() {
+        assert_eq!(canonical_fit_sport("cycling", Some("Stopwatch")), "cycling");
+    }
 }
