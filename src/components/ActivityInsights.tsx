@@ -17,6 +17,7 @@ import {
   formatRelTime,
   formatTelemetryTooltipHeader,
   formatTelemetryXAxisTick,
+  type TelemetryTimerMetadata,
   type TelemetryXAxisMode,
 } from "../lib/telemetryAxis";
 import { useTranslation } from "../lib/i18n";
@@ -31,6 +32,7 @@ type Props = {
   onZoomChange?: (range: { start: number; end: number }) => void;
   lapTimestampsUtc?: string[];
   smoothGraphs?: boolean;
+  timerMetadata?: TelemetryTimerMetadata | null;
 };
 
 type SeriesRow = [number, number | null, number, number, number | null];
@@ -55,6 +57,7 @@ export function ActivityInsights({
   onZoomChange,
   lapTimestampsUtc = [],
   smoothGraphs = true,
+  timerMetadata,
 }: Props) {
   const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
   const isDark = theme === "dark";
@@ -81,24 +84,25 @@ export function ActivityInsights({
   }
 
   const t0 = records[0]?.timestamp_ms ?? 0;
-  const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
-  const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
-  const telemetryPoints = buildTelemetryPoints(records, t0, xAxisMode, distanceUnit);
+  const telemetryPoints = buildTelemetryPoints(records, t0, xAxisMode, distanceUnit, timerMetadata);
+  const totalDurationMs = Math.max(0, telemetryPoints[telemetryPoints.length - 1]?.relMs ?? ((records[records.length - 1]?.timestamp_ms ?? t0) - t0));
+  const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(telemetryPoints.length || records.length, totalDurationMs, zoomRange) : 1;
   const xAxisBounds = buildTelemetryXAxisBounds(telemetryPoints);
-  const formatTooltipHeader = (relMs: number, distanceMeters: number | null, mode: TelemetryXAxisMode = xAxisMode) =>
-    formatTelemetryTooltipHeader(mode, t0, relMs, distanceMeters, distanceUnit);
+  const formatTooltipHeader = (relMs: number, distanceMeters: number | null, mode: TelemetryXAxisMode = xAxisMode, timestampMs?: number) =>
+    formatTelemetryTooltipHeader(mode, t0, relMs, distanceMeters, distanceUnit, timestampMs);
 
-  const timeline = records.map((r, i) => {
-    const prev = i > 0 ? records[i - 1] : undefined;
-    const dt = prev ? (r.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
+  const timeline = telemetryPoints.map((point, i) => {
+    const r = point.record;
+    const prevPoint = i > 0 ? telemetryPoints[i - 1] : undefined;
+    const prevRecord = prevPoint?.record;
+    const dt = prevPoint ? (point.relMs - prevPoint.relMs) / 1000 : 0;
     const derivedSpeed =
-      !r.speed_m_s && prev && typeof r.distance_m === "number" && typeof prev.distance_m === "number" && dt > 0
-        ? Math.max(0, (r.distance_m - prev.distance_m) / dt)
+      !r.speed_m_s && prevRecord && typeof r.distance_m === "number" && typeof prevRecord.distance_m === "number" && dt > 0
+        ? Math.max(0, (r.distance_m - prevRecord.distance_m) / dt)
         : undefined;
     const speedMs = r.speed_m_s ?? derivedSpeed;
     const speedInUnit = typeof speedMs === "number" ? convertSpeedMps(speedMs, distanceUnit) : null;
     const paceMinPerUnit = speedInUnit && speedInUnit > 0 ? 60 / speedInUnit : null;
-    const point = telemetryPoints[i];
     return {
       x: point.x,
       relMs: point.relMs,
@@ -110,7 +114,7 @@ export function ActivityInsights({
       power: r.power ?? null,
       cadence: r.cadence ?? null,
       temperatureC: r.temperature_c ?? null,
-      timestampMs: r.timestamp_ms,
+      timestampMs: point.timestampMs,
     };
   });
 
@@ -124,20 +128,20 @@ export function ActivityInsights({
   const cadenceLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(cadenceLineData, 1, smoothWindow) : cadenceLineData;
   const powerLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(powerLineData, 1, smoothWindow) : powerLineData;
 
-  const hasPowerData = records.some((r) => typeof r.power === "number" && r.power > 0);
-  const hasHeartRateData = records.some((r) => typeof r.heart_rate === "number" && r.heart_rate > 0);
+  const hasPowerData = timeline.some((d) => typeof d.power === "number" && d.power > 0);
+  const hasHeartRateData = timeline.some((d) => typeof d.heartRate === "number" && d.heartRate > 0);
 
-  const lapMarkers = buildLapMarkers(records, lapTimestampsUtc, t0, xAxisMode, distanceUnit);
+  const lapMarkers = buildLapMarkers(records, lapTimestampsUtc, t0, xAxisMode, distanceUnit, timerMetadata);
 
-  const hrValues = records
-    .map((r) => r.heart_rate)
+  const hrValues = timeline
+    .map((d) => d.heartRate)
     .filter((n): n is number => typeof n === "number" && n > 0);
   const zoneMinutes = hrZones.map(() => 0);
   if (hrValues.length > 0) {
-    for (let i = 0; i < records.length - 1; i += 1) {
-      const hr = records[i].heart_rate;
+    for (let i = 0; i < timeline.length - 1; i += 1) {
+      const hr = timeline[i].heartRate;
       if (typeof hr !== "number" || hr <= 0) continue;
-      const dtMin = Math.max(0, (records[i + 1].timestamp_ms - records[i].timestamp_ms) / 60000);
+      const dtMin = Math.max(0, (timeline[i + 1].relMs - timeline[i].relMs) / 60000);
       const zoneIndex = resolveHeartRateZoneIndex(hr, hrZones);
       zoneMinutes[zoneIndex] += dtMin;
     }
@@ -159,7 +163,7 @@ export function ActivityInsights({
         const p = params?.[0];
         const rel = Number(p?.value?.[2] ?? 0);
         const distanceMeters = (p?.value?.[4] ?? null) as number | null;
-        let html = formatTooltipHeader(rel, distanceMeters);
+        let html = formatTooltipHeader(rel, distanceMeters, xAxisMode, Number(p?.value?.[3] ?? 0));
         for (const row of params) {
           if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
             html += `<div>${row.marker} ${row.seriesName}: <strong>${Number(row.value[1]).toFixed(2)}</strong></div>`;
@@ -213,7 +217,7 @@ export function ActivityInsights({
         const rel = Number(p?.value?.[2] ?? 0);
         const distanceMeters = (p?.value?.[4] ?? null) as number | null;
         const val = p?.value?.[1];
-        return `${formatTooltipHeader(rel, distanceMeters)}<div>${p?.marker ?? ""} ${tr("insights.elevation")}: <strong>${val == null ? "--" : Number(val).toFixed(2)} ${elevationLabel(distanceUnit)}</strong></div>`;
+        return `${formatTooltipHeader(rel, distanceMeters, xAxisMode, Number(p?.value?.[3] ?? 0))}<div>${p?.marker ?? ""} ${tr("insights.elevation")}: <strong>${val == null ? "--" : Number(val).toFixed(2)} ${elevationLabel(distanceUnit)}</strong></div>`;
       }
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
@@ -286,7 +290,7 @@ export function ActivityInsights({
         const p = params?.[0];
         const rel = Number(p?.value?.[2] ?? 0);
         const distanceMeters = (p?.value?.[4] ?? null) as number | null;
-        let html = formatTooltipHeader(rel, distanceMeters);
+        let html = formatTooltipHeader(rel, distanceMeters, xAxisMode, Number(p?.value?.[3] ?? 0));
         for (const row of params) {
           if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
             const unit = row.seriesName === tr("insights.cadence") ? " rpm" : " W";
@@ -345,9 +349,9 @@ export function ActivityInsights({
     ],
   };
 
-  const hrPowerScatter = records
-    .filter((r) => typeof r.heart_rate === "number" && typeof r.power === "number")
-    .map((r) => [r.heart_rate as number, r.power as number]);
+  const hrPowerScatter = timeline
+    .filter((d) => typeof d.heartRate === "number" && typeof d.power === "number")
+    .map((d) => [d.heartRate as number, d.power as number]);
 
   const scatterOption = {
     tooltip: { trigger: "item", ...tooltipStyle },
@@ -452,7 +456,7 @@ export function ActivityInsights({
     ],
   };
 
-  const totalRelMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
+  const totalRelMs = Math.max(0, timeline[timeline.length - 1]?.relMs ?? totalDurationMs);
   const heatBins = Math.max(1, Math.ceil(totalRelMs / 60000));
   const heatMetrics = [
     {

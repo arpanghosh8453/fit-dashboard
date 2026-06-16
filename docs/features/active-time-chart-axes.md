@@ -2,7 +2,9 @@
 
 ## Status
 
-Design proposal for issue #45.
+Implemented design for issue #45.
+
+This branch is intentionally stacked on the issue #23 duration fix and issue #38 chart Time/Distance axis work. The active-time implementation builds on both behaviours.
 
 Related issues:
 
@@ -157,10 +159,10 @@ JSON export should include the timer metadata needed to explain the difference b
 - timer time
 - stopped time
 - stopped intervals with trigger information when available
-- per-record active/stopped classification when record-level export adopts active-time fields
-- active elapsed seconds for records when record-level export adopts active-time fields
+- per-record active/stopped classification as a future export enhancement
+- active elapsed seconds for records as a future export enhancement
 
-CSV export does not need to include the full interval list initially, but exported records may later include active elapsed seconds and stopped/active classification if the chart model adopts those values.
+The first implementation includes the parsed `metadata_json` object in JSON export so timer events and stopped intervals are available for diagnostics. CSV export does not include the full interval list initially, but exported records may later include active elapsed seconds and stopped/active classification.
 
 ## Migration and Reimport
 

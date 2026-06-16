@@ -30,7 +30,7 @@ import {
   speedLabel,
 } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
-import { hasUsableDistanceAxis, type TelemetryXAxisMode } from "../lib/telemetryAxis";
+import { hasUsableDistanceAxis, type TelemetryTimerMetadata, type TelemetryXAxisMode } from "../lib/telemetryAxis";
 
 type Props = { onLogout: () => Promise<void> };
 
@@ -48,6 +48,7 @@ type ActivityMetadata = {
   activity_metrics?: {
     vo2_max?: number | null;
   };
+  timer?: TelemetryTimerMetadata | null;
   session?: {
     beginning_body_battery?: number | null;
     ending_body_battery?: number | null;
@@ -1031,9 +1032,6 @@ export function Dashboard({ onLogout }: Props) {
       setTelemetryXAxisMode("time");
     }
   }, [selectedActivity, records.length, hasTelemetryDistanceAxis, telemetryXAxisMode]);
-  const deviceBadgeSerial = typeof selectedMetadata?.file_id?.serial_number === "number"
-    ? String(selectedMetadata.file_id.serial_number)
-    : "";
   const detailStats = useMemo(() => {
     if (!selectedActivity) return [] as Array<{ key: string; label: string; value: string; secondary?: string; icon: Icon }>;
     const out: Array<{ key: string; label: string; value: string; secondary?: string; icon: Icon }> = [];
@@ -1572,7 +1570,6 @@ export function Dashboard({ onLogout }: Props) {
                   <div className="detail-badges">
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
                     {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
-                    {deviceBadgeSerial && <span className="badge device">SN {deviceBadgeSerial}</span>}
                     <div className="detail-axis-toggle" aria-label={t("detail.chartXAxis")}>
                       <button
                         type="button"
@@ -1628,10 +1625,10 @@ export function Dashboard({ onLogout }: Props) {
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>{t("detail.heartRateAndPace")}</h3><ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} xAxisMode={telemetryXAxisMode} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} /></div>
+                <div className="panel"><h3>{t("detail.heartRateAndPace")}</h3><ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} xAxisMode={telemetryXAxisMode} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} timerMetadata={selectedMetadata?.timer} /></div>
                 <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
               </div>
-              <ActivityInsights records={selectedRecords} theme={theme} distanceUnit={distanceUnit} xAxisMode={telemetryXAxisMode} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
+              <ActivityInsights records={selectedRecords} theme={theme} distanceUnit={distanceUnit} xAxisMode={telemetryXAxisMode} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} timerMetadata={selectedMetadata?.timer} />
               {lapRows.length > 0 && (
                 <div className="panel laps-table-panel">
                   <h3>{t("detail.laps")}</h3>

@@ -7,6 +7,23 @@ use sha2::{Digest, Sha256};
 use crate::models::{ParsedActivity, RecordPoint};
 
 const NON_ACTIVITY_FIT_MARKER: &str = "non-activity-fit:";
+const TIMER_INTERVAL_TOLERANCE_S: f64 = 5.0;
+
+#[derive(Clone, Debug, PartialEq)]
+struct TimerEvent {
+    timestamp_ms: i64,
+    event: String,
+    event_type: String,
+    timer_trigger: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StoppedInterval {
+    start_ms: i64,
+    end_ms: i64,
+    trigger: Option<String>,
+    resume_trigger: Option<String>,
+}
 
 pub fn is_non_activity_fit_error(err: &anyhow::Error) -> bool {
     err.chain()
@@ -296,6 +313,143 @@ fn select_fit_time_range_ms(
     (start_ts, end_ts)
 }
 
+fn normalize_fit_token(raw: &str) -> Option<String> {
+    let value = raw.trim().to_lowercase().replace([' ', '-'], "_");
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn fit_event_name(value: &Value) -> Option<String> {
+    let raw = normalize_fit_token(&value_string(value))?;
+    Some(match raw.as_str() {
+        "0" => "timer".to_string(),
+        _ => raw,
+    })
+}
+
+fn fit_event_type_name(value: &Value) -> Option<String> {
+    let raw = normalize_fit_token(&value_string(value))?;
+    Some(match raw.as_str() {
+        "0" => "start".to_string(),
+        "1" => "stop".to_string(),
+        "4" => "stop_all".to_string(),
+        "8" => "stop_disable".to_string(),
+        "9" => "stop_disable_all".to_string(),
+        _ => raw,
+    })
+}
+
+fn fit_timer_trigger_name(value: &Value) -> Option<String> {
+    let raw = normalize_fit_token(&value_string(value))?;
+    Some(match raw.as_str() {
+        "0" => "manual".to_string(),
+        "1" => "auto".to_string(),
+        "2" => "fitness_equipment".to_string(),
+        _ => raw,
+    })
+}
+
+fn is_timer_start_event(event_type: &str) -> bool {
+    matches!(event_type, "start" | "start_all")
+}
+
+fn is_timer_stop_event(event_type: &str) -> bool {
+    matches!(event_type, "stop" | "stop_all" | "stop_disable" | "stop_disable_all")
+}
+
+fn timestamp_ms_to_rfc3339(ts: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(ts).map(|dt| dt.to_rfc3339())
+}
+
+fn build_stopped_intervals(
+    timer_events: &[TimerEvent],
+    start_bound_ms: i64,
+    end_bound_ms: i64,
+) -> Vec<StoppedInterval> {
+    let mut events = timer_events.to_vec();
+    events.sort_by_key(|event| event.timestamp_ms);
+
+    let mut stopped_start: Option<TimerEvent> = None;
+    let mut intervals = Vec::new();
+
+    for event in events {
+        if event.event != "timer" {
+            continue;
+        }
+
+        if is_timer_stop_event(&event.event_type) {
+            if stopped_start.is_none() {
+                stopped_start = Some(event);
+            }
+            continue;
+        }
+
+        if is_timer_start_event(&event.event_type) {
+            let Some(stop_event) = stopped_start.take() else {
+                continue;
+            };
+
+            let start_ms = stop_event.timestamp_ms.max(start_bound_ms);
+            let end_ms = event.timestamp_ms.min(end_bound_ms);
+            if end_ms > start_ms {
+                intervals.push(StoppedInterval {
+                    start_ms,
+                    end_ms,
+                    trigger: stop_event.timer_trigger,
+                    resume_trigger: event.timer_trigger,
+                });
+            }
+        }
+    }
+
+    intervals
+}
+
+fn build_timer_metadata(
+    timer_events: &[TimerEvent],
+    record_start_ts: i64,
+    record_end_ts: i64,
+    elapsed_time_s: Option<f64>,
+    timer_time_s: f64,
+) -> serde_json::Value {
+    let elapsed_time_s = valid_duration_s(elapsed_time_s)
+        .unwrap_or_else(|| ((record_end_ts - record_start_ts).max(0) as f64) / 1000.0);
+    let intervals = build_stopped_intervals(timer_events, record_start_ts, record_end_ts);
+    let stopped_time_s: f64 = intervals
+        .iter()
+        .map(|interval| ((interval.end_ms - interval.start_ms).max(0) as f64) / 1000.0)
+        .sum();
+    let derived_timer_time_s = (elapsed_time_s - stopped_time_s).max(0.0);
+    let intervals_reliable = !intervals.is_empty()
+        && (derived_timer_time_s - timer_time_s).abs() <= TIMER_INTERVAL_TOLERANCE_S;
+
+    serde_json::json!({
+        "schema_version": 1,
+        "source": "fit_event_messages",
+        "active_time_supported": intervals_reliable,
+        "intervals_reliable": intervals_reliable,
+        "elapsed_time_s": elapsed_time_s,
+        "timer_time_s": timer_time_s,
+        "stopped_time_s": stopped_time_s,
+        "events": timer_events.iter().map(|event| serde_json::json!({
+            "timestamp": timestamp_ms_to_rfc3339(event.timestamp_ms),
+            "event": event.event,
+            "event_type": event.event_type,
+            "timer_trigger": event.timer_trigger
+        })).collect::<Vec<_>>(),
+        "stopped_intervals": intervals.iter().map(|interval| serde_json::json!({
+            "start_ts_utc": timestamp_ms_to_rfc3339(interval.start_ms),
+            "end_ts_utc": timestamp_ms_to_rfc3339(interval.end_ms),
+            "duration_s": ((interval.end_ms - interval.start_ms).max(0) as f64) / 1000.0,
+            "trigger": interval.trigger,
+            "resume_trigger": interval.resume_trigger
+        })).collect::<Vec<_>>()
+    })
+}
+
 fn update_min_ts(slot: &mut Option<i64>, value: Option<i64>) {
     if let Some(ts) = value {
         *slot = Some(slot.map_or(ts, |current| current.min(ts)));
@@ -381,6 +535,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut activity_total_timer_time_s: Option<f64> = None;
     let mut lap_total_timer_time_sum_s: Option<f64> = None;
     let mut lap_ranges: Vec<serde_json::Value> = Vec::new();
+    let mut timer_events: Vec<TimerEvent> = Vec::new();
     let mut heart_rate_zone_bounds_bpm: Vec<i64> = Vec::new();
 
     let mut min_ts: Option<i64> = None;
@@ -589,6 +744,32 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     activity_total_timer_time_s = value_f64(field.value());
                 }
             }
+        } else if rec.kind() == MesgNum::Event {
+            let mut timestamp_ms: Option<i64> = None;
+            let mut event: Option<String> = None;
+            let mut event_type: Option<String> = None;
+            let mut timer_trigger: Option<String> = None;
+
+            for field in rec.fields() {
+                match field.name() {
+                    "timestamp" => timestamp_ms = value_timestamp_ms(field.value()),
+                    "event" => event = fit_event_name(field.value()),
+                    "event_type" => event_type = fit_event_type_name(field.value()),
+                    "timer_trigger" => timer_trigger = fit_timer_trigger_name(field.value()),
+                    _ => {}
+                }
+            }
+
+            if event.as_deref() == Some("timer") {
+                if let (Some(timestamp_ms), Some(event_type)) = (timestamp_ms, event_type) {
+                    timer_events.push(TimerEvent {
+                        timestamp_ms,
+                        event: "timer".to_string(),
+                        event_type,
+                        timer_trigger,
+                    });
+                }
+            }
         } else if rec.kind() == MesgNum::Lap {
             let mut lap_start_ms: Option<i64> = None;
             let mut lap_end_ms: Option<i64> = None;
@@ -730,6 +911,13 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     );
     let distance_m = total_distance_m(&points);
     let (start_latitude, start_longitude) = first_valid_coordinates(&points);
+    let timer_metadata = build_timer_metadata(
+        &timer_events,
+        record_start_ts,
+        record_end_ts,
+        session_total_elapsed_time_sum_s,
+        duration_s,
+    );
 
     let file_id_combined_name = combine_device_name(
         file_id_product_name.clone(),
@@ -776,6 +964,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         "activity": {
             "total_timer_time_s": activity_total_timer_time_s
         },
+        "timer": timer_metadata,
         "heart_rate_zone_bounds_bpm": heart_rate_zone_bounds_bpm,
         "session": {
             "count": session_count,
@@ -1198,6 +1387,74 @@ mod tests {
 
         assert_eq!(duration, 2_705.309);
         assert_eq!(source, "sessions.total_elapsed_time_sum");
+    }
+
+    fn timer_event(timestamp_ms: i64, event_type: &str, trigger: Option<&str>) -> TimerEvent {
+        TimerEvent {
+            timestamp_ms,
+            event: "timer".to_string(),
+            event_type: event_type.to_string(),
+            timer_trigger: trigger.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn fit_timer_intervals_pair_stop_with_next_start() {
+        let events = vec![
+            timer_event(0, "start", Some("manual")),
+            timer_event(10_000, "stop_all", Some("auto")),
+            timer_event(20_000, "start", Some("auto")),
+            timer_event(30_000, "stop_all", Some("manual")),
+        ];
+
+        let intervals = build_stopped_intervals(&events, 0, 40_000);
+
+        assert_eq!(intervals.len(), 1);
+        assert_eq!(intervals[0].start_ms, 10_000);
+        assert_eq!(intervals[0].end_ms, 20_000);
+        assert_eq!(intervals[0].trigger.as_deref(), Some("auto"));
+        assert_eq!(intervals[0].resume_trigger.as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn fit_timer_intervals_clamp_to_record_bounds() {
+        let events = vec![
+            timer_event(5_000, "stop", Some("manual")),
+            timer_event(20_000, "start", Some("manual")),
+        ];
+
+        let intervals = build_stopped_intervals(&events, 10_000, 15_000);
+
+        assert_eq!(intervals.len(), 1);
+        assert_eq!(intervals[0].start_ms, 10_000);
+        assert_eq!(intervals[0].end_ms, 15_000);
+    }
+
+    #[test]
+    fn fit_timer_metadata_marks_reliable_when_active_time_matches_timer() {
+        let events = vec![
+            timer_event(10_000, "stop_all", Some("auto")),
+            timer_event(20_000, "start", Some("auto")),
+        ];
+
+        let metadata = build_timer_metadata(&events, 0, 100_000, Some(100.0), 90.0);
+
+        assert_eq!(metadata["active_time_supported"].as_bool(), Some(true));
+        assert_eq!(metadata["intervals_reliable"].as_bool(), Some(true));
+        assert_eq!(metadata["stopped_time_s"].as_f64(), Some(10.0));
+    }
+
+    #[test]
+    fn fit_timer_metadata_falls_back_when_intervals_do_not_match_timer() {
+        let events = vec![
+            timer_event(10_000, "stop_all", Some("auto")),
+            timer_event(20_000, "start", Some("auto")),
+        ];
+
+        let metadata = build_timer_metadata(&events, 0, 100_000, Some(100.0), 70.0);
+
+        assert_eq!(metadata["active_time_supported"].as_bool(), Some(false));
+        assert_eq!(metadata["intervals_reliable"].as_bool(), Some(false));
     }
 
     #[test]
