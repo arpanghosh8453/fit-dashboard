@@ -174,6 +174,22 @@ function forerunnerLabel(value?: string | null): string | null {
   return `Forerunner ${model}${modelSuffix}${suffix}`;
 }
 
+function isGenericProductLabel(value?: string | null): boolean {
+  return /^product[\s_-]*\d+$/i.test(value?.trim() ?? "");
+}
+
+function profileProductLabel(product?: ProductMetadata | null): string | null {
+  const label = forerunnerLabel(product?.name)
+    ?? product?.label
+    ?? labelFromIdentifier(product?.name);
+
+  return label && !isGenericProductLabel(label) ? label : null;
+}
+
+function rawProductCodeLabel(product?: ProductMetadata | null): string | null {
+  return typeof product?.code === "number" ? `Product ${product.code}` : null;
+}
+
 function derivedProductLabel(device: DeviceMetadata): string | null {
   const product = device.product;
   if (isGarmin(device)) {
@@ -196,19 +212,19 @@ function derivedProductLabel(device: DeviceMetadata): string | null {
     }
   }
 
-  return forerunnerLabel(product?.name)
-    ?? product?.label
-    ?? labelFromIdentifier(product?.name)
-    ?? (typeof product?.code === "number" ? `Product ${product.code}` : null);
+  return profileProductLabel(product);
 }
 
 export function formatDeviceLabel(device: DeviceMetadata): string {
   const manufacturer = displayManufacturerLabel(device) ?? "";
-  const product = derivedProductLabel(device)
-    ?? firstDeviceTypeLabel(device)
-    ?? "";
-  return [manufacturer, product].filter(Boolean).join(" ").trim()
-    || firstDeviceTypeLabel(device)
+  const product = derivedProductLabel(device);
+  const deviceType = firstDeviceTypeLabel(device);
+  const rawProduct = rawProductCodeLabel(device.product);
+  const displayPart = product ?? deviceType ?? rawProduct ?? "";
+
+  return [manufacturer, displayPart].filter(Boolean).join(" ").trim()
+    || deviceType
+    || rawProduct
     || "Device";
 }
 

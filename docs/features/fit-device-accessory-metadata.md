@@ -347,12 +347,17 @@ Display/export resolution order:
 
 1. Use an app-owned display lookup when a raw product code plus context identifies
    a more useful device name.
-2. Use the FIT SDK/profile product name when available.
+2. Use the FIT SDK/profile product name when available and it is not a generic
+   unresolved label such as `Product 3`.
 3. Fall back to manufacturer plus device type.
-4. Fall back to raw product code.
+4. Fall back to device type when no manufacturer is available.
+5. Fall back to manufacturer plus raw product code, or raw product code alone,
+   only when no useful device type is available.
 
 Display lookup entries fill SDK gaps by default; they should not override a
-usable SDK name unless a future entry explicitly opts into that behaviour.
+usable SDK name unless a future entry explicitly opts into that behaviour. Generic
+`Product #` labels are considered unresolved display labels, not useful SDK
+names, and should never outrank device type labels.
 
 Reverse mapping helpers should be centralized and covered by tests. Test cases
 should include known values with code `0`, unknown strings that would otherwise
@@ -407,9 +412,11 @@ Examples from observed files:
 - Garmin product code `3592` with ANT+ `bike_radar` and `bike_light_main` records
   remains raw product code metadata, but displays as `Garmin Varia RTL515`.
 - Magene product code `3` with ANT+ type `bike_speed` remains raw product code
-  metadata, but displays as `Magene bike speed sensor`.
+  metadata, but displays as `Magene Speed Sensor`.
 - Magene product code `3` with ANT+ type `bike_cadence` remains raw product code
-  metadata, but displays as `Magene bike cadence sensor`.
+  metadata, but displays as `Magene Cadence Sensor`.
+- Product code `3` with no manufacturer and ANT+ type `bike_cadence` remains raw
+  product code metadata, but displays as `Cadence Sensor`.
 
 TCX and GPX files should use the same metadata envelope when possible, but they
 usually provide less device data:
