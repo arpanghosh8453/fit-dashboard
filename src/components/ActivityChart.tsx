@@ -7,6 +7,7 @@ import { convertPaceMinPerKm, paceLabel, type DistanceUnit } from "../lib/units"
 import {
   buildLapMarkers,
   buildTelemetryPoints,
+  buildTelemetryXAxisBounds,
   formatTelemetryTooltipHeader,
   formatTelemetryXAxisTick,
   type TelemetryXAxisMode,
@@ -48,6 +49,7 @@ export function ActivityChart({
   const { t } = useTranslation();
 
   const telemetryPoints = buildTelemetryPoints(records, t0, xAxisMode, distanceUnit);
+  const xAxisBounds = buildTelemetryXAxisBounds(telemetryPoints);
   const formatTooltipHeader = (relMs: number, distanceMeters: number | null) =>
     formatTelemetryTooltipHeader(xAxisMode, t0, relMs, distanceMeters, distanceUnit);
 
@@ -85,6 +87,7 @@ export function ActivityChart({
 
   const sharedXAxis = {
     type: "value",
+    ...xAxisBounds,
     axisLabel: {
       color: axisColor,
       fontSize: 11,

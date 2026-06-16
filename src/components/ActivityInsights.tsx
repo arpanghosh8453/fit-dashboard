@@ -13,6 +13,7 @@ import {
 import {
   buildLapMarkers,
   buildTelemetryPoints,
+  buildTelemetryXAxisBounds,
   formatRelTime,
   formatTelemetryTooltipHeader,
   formatTelemetryXAxisTick,
@@ -83,6 +84,7 @@ export function ActivityInsights({
   const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
   const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
   const telemetryPoints = buildTelemetryPoints(records, t0, xAxisMode, distanceUnit);
+  const xAxisBounds = buildTelemetryXAxisBounds(telemetryPoints);
   const formatTooltipHeader = (relMs: number, distanceMeters: number | null, mode: TelemetryXAxisMode = xAxisMode) =>
     formatTelemetryTooltipHeader(mode, t0, relMs, distanceMeters, distanceUnit);
 
@@ -143,6 +145,7 @@ export function ActivityInsights({
 
   const sharedXAxis = {
     type: "value",
+    ...xAxisBounds,
     axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatTelemetryXAxisTick(val, xAxisMode, distanceUnit) },
     axisLine: { lineStyle: { color: gridLine } },
     splitLine: { show: false },

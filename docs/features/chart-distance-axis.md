@@ -10,6 +10,7 @@ This feature applies only to time-based telemetry line charts. The effort heatma
 
 - Let users inspect activity telemetry by either elapsed time or cumulative distance.
 - Keep one shared x-axis mode across all eligible Individual page telemetry charts.
+- Keep chart x-axes bounded to the plotted telemetry extent so charts do not show blank trailing whitespace after the final sample.
 - Preserve existing zoom, smoothing, lap marker, tooltip, and unit behaviour as much as possible.
 - Avoid backend or parser changes unless frontend data proves insufficient.
 
@@ -93,13 +94,34 @@ For Time mode:
 
 - `x = relMs`
 - each axis tick uses elapsed time formatting
+- the x-axis domain starts at `0` and ends at the maximum finite plotted elapsed time
 
 For Distance mode:
 
 - `x = convertDistanceMeters(distanceMeters, distanceUnit)`
 - each axis tick uses distance formatting with the active distance unit, such as `1.25 km` or `0.75 mi`
+- the x-axis domain starts at `0` and ends at the maximum finite plotted distance in the active distance unit
 
 Series should keep additional values in the row so tooltip formatters can show both time and distance regardless of current x-axis mode.
+
+## Axis Bounds
+
+The telemetry line charts should use explicit x-axis bounds instead of relying on ECharts automatic value-axis extent.
+
+Without explicit bounds, ECharts rounds the domain to visually neat tick intervals. For long activities, a final sample at `4:36:33` can produce a visible `5:00:00` endpoint. That creates blank whitespace after the data and can make the chart appear inconsistent with the activity duration shown elsewhere in the UI.
+
+For both Time and Distance modes:
+
+- set `xAxis.min = 0`
+- compute `xAxis.max` from finite x-values that are actually present in the plotted telemetry series
+- only set `xAxis.max` when the computed value is finite and greater than `0`
+- keep the chart data unchanged; this is an axis display bound, not a parser, record, or duration change
+
+For Time mode, the max should be the maximum finite elapsed timestamp represented by the plotted telemetry points. This preserves elapsed record-time chart semantics, including stopped-time gaps when records span them, while preventing ECharts from extending the visible axis beyond the last sample.
+
+For Distance mode, the max should be the maximum finite cumulative distance represented by the plotted telemetry points in the current distance unit. This avoids trailing distance whitespace such as showing a rounded `105 km` endpoint when the final plotted point is `102.25 km`.
+
+This intentionally favours exact telemetry extent over nice rounded axis endpoints for Individual telemetry charts.
 
 ## Lap Markers
 
@@ -141,9 +163,10 @@ A future refinement could calculate the smoothing window from visible distance i
 6. Refactor `ActivityInsights` time-based line chart data for Speed Trend, Cadence, Power, and Elevation.
 7. Update tooltip headers to include both time and distance context.
 8. Update lap marker creation to support both time and distance modes.
-9. Reset the x-axis mode to Time when the selected activity has no finite distance samples.
-10. Leave the effort heatmap unchanged and document that it is excluded because it is minute-binned.
-11. Add translation keys for the new control labels and tooltip text.
+9. Add shared x-axis bound helpers so eligible telemetry charts set `min = 0` and `max` to the maximum finite plotted x-value for both Time and Distance modes.
+10. Reset the x-axis mode to Time when the selected activity has no finite distance samples.
+11. Leave the effort heatmap unchanged and document that it is excluded because it is minute-binned.
+12. Add translation keys for the new control labels and tooltip text.
 
 ## Validation
 
@@ -151,6 +174,8 @@ Manual validation should cover:
 
 - Time mode remains visually unchanged from current behaviour.
 - Distance mode works on an activity with complete distance samples.
+- Time mode does not show blank trailing whitespace after the maximum finite telemetry x-value, for example an activity ending around `4:36:33` should not visually extend to `5:00:00`.
+- Distance mode does not show blank trailing whitespace after the maximum finite distance sample.
 - Distance mode is disabled or unavailable for an activity with no finite distance samples.
 - Switching to an activity with no finite distance samples resets the mode to Time.
 - Lap markers appear in correct positions in both modes.

@@ -10,6 +10,11 @@ export type TelemetryPoint = {
   distanceMeters: number | null;
 };
 
+export type TelemetryXAxisBounds = {
+  min: number;
+  max?: number;
+};
+
 type LapMarker = { xAxis: number; name: string };
 
 function finiteDistanceMeters(record: RecordPoint): number | null {
@@ -42,6 +47,18 @@ export function buildTelemetryPoints(
       distanceMeters,
     };
   });
+}
+
+export function buildTelemetryXAxisBounds(points: Array<{ x: number | null }>): TelemetryXAxisBounds {
+  let max = 0;
+
+  for (const point of points) {
+    if (typeof point.x === "number" && Number.isFinite(point.x)) {
+      max = Math.max(max, point.x);
+    }
+  }
+
+  return max > 0 ? { min: 0, max } : { min: 0 };
 }
 
 export function formatRelTime(ms: number): string {
