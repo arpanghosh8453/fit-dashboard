@@ -122,6 +122,7 @@ export function ActivityInsights({
 
   const hasPowerData = records.some((r) => typeof r.power === "number" && r.power > 0);
   const hasHeartRateData = records.some((r) => typeof r.heart_rate === "number" && r.heart_rate > 0);
+  const hasElevationData = records.some((r) => typeof r.altitude_m === "number" && Number.isFinite(r.altitude_m));
 
   const lapMarkers = lapTimestampsUtc
     .slice(1)
@@ -623,10 +624,12 @@ export function ActivityInsights({
         <h3>{tr("insights.effortHeatmap")}</h3>
         <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
       </article>
-      <article className="panel">
-        <h3>{tr("insights.elevation")}</h3>
-        <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
-      </article>
+      {hasElevationData && (
+        <article className="panel">
+          <h3>{tr("insights.elevation")}</h3>
+          <ReactECharts option={elevationOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+        </article>
+      )}
       {hasPowerData && hasHeartRateData && (
         <article className="panel">
           <h3>{tr("insights.powerVsHeartRate")}</h3>
