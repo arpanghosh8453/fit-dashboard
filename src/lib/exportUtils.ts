@@ -5,6 +5,7 @@
 
 import type { Activity, RecordPoint } from "../types";
 import { api } from "./api";
+import { buildExportDeviceInfo, parseActivityMetadata } from "./deviceMetadata";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -93,11 +94,14 @@ export function buildCsv(activity: Activity, records: RecordPoint[]): string {
 /* ── JSON ────────────────────────────────────────────────────────── */
 
 export function buildJson(activity: Activity, records: RecordPoint[]): string {
+  const metadata = parseActivityMetadata(activity.metadata_json);
+
   return JSON.stringify(
     {
       _exportInfo: {
         format: "FIT Dashboard JSON Export",
         exportedAt: new Date().toISOString(),
+        deviceMetadataVersion: metadata?.device_info?.schema_version ?? null,
       },
       activity: {
         id: activity.id,
@@ -110,6 +114,7 @@ export function buildJson(activity: Activity, records: RecordPoint[]): string {
         durationS: activity.duration_s,
         distanceM: activity.distance_m,
       },
+      deviceInfo: buildExportDeviceInfo(metadata),
       records,
     },
     null,
