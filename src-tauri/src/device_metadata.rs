@@ -768,6 +768,30 @@ pub fn decoded_file_id(raw: &RawFileId) -> DecodedFileIdMetadata {
     }
 }
 
+pub fn decoded_file_id_display_name(decoded: &DecodedFileIdMetadata) -> Option<String> {
+    let manufacturer = decoded
+        .manufacturer
+        .label
+        .as_deref()
+        .or(decoded.manufacturer.name.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let product = decoded
+        .product
+        .label
+        .as_deref()
+        .or(decoded.product.name.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    match (manufacturer, product) {
+        (Some(manufacturer), Some(product)) => Some(format!("{manufacturer} {product}")),
+        (Some(manufacturer), None) => Some(manufacturer.to_string()),
+        (None, Some(product)) => Some(product.to_string()),
+        (None, None) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -788,6 +812,21 @@ mod tests {
         assert_eq!(
             product_label(Some("fr255_small_music")).as_deref(),
             Some("Forerunner 255S Music")
+        );
+    }
+
+    #[test]
+    fn decoded_file_id_display_name_uses_resolved_labels() {
+        let decoded = decoded_file_id(&RawFileId {
+            manufacturer_value: Some("garmin".to_string()),
+            product_field: Some("garmin_product".to_string()),
+            product_value: Some("fr255".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            decoded_file_id_display_name(&decoded).as_deref(),
+            Some("Garmin Forerunner 255")
         );
     }
 

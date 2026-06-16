@@ -16,6 +16,13 @@ This makes the exported JSON incomplete for users who want to know which sensors
 contributed to an activity, and it can make the activity header misleading when
 a serial number is shown without enough context.
 
+Sparse Garmin Stopwatch/manual-timer FIT files expose another edge case. They
+may contain `sport.name = Stopwatch` while `session.sport` remains the numeric
+value `52`, and their single `device_info` record may omit `device_index`,
+`source_type`, and `device_type`. In that case the app can leak both raw activity
+type `52` and raw device text such as `garmin fr255` even though the file has
+enough metadata to display `Stopwatch` and `Garmin Forerunner 255`.
+
 ## Current Behaviour
 
 During FIT import, the parser inspects `file_id` and `device_info` messages.
@@ -24,6 +31,34 @@ The persisted `activities.device` value is selected using this priority:
 1. `device_info` where `device_index` is `creator` or numeric `0`
 2. `file_id` manufacturer/product
 3. first available `device_info` record
+
+For sparse files where `device_info` lacks a creator index and source type, the
+new device list can classify the record as `unknown` rather than `primary`.
+Current UI fallback can then use the legacy `activities.device` string, which is
+built from raw FIT enum names such as `garmin fr255`.
+
+The FIT parser also currently reads activity type from the `session` message but
+does not use the FIT `sport` message. Stopwatch/manual-timer activities observed
+from Garmin use:
+
+```text
+sport.name = Stopwatch
+sport.sport = 52
+session.sport = 52
+session.sub_sport = generic
+activity.type = manual
+file_id.manufacturer = garmin
+file_id.garmin_product = fr255
+device_info.manufacturer = garmin
+device_info.garmin_product = fr255
+device_info.device_index = null
+device_info.source_type = null
+device_info.device_type = null
+```
+
+The app should treat `sport.name = Stopwatch` as the meaningful activity-type
+label when the session sport is numeric or otherwise unresolved. It should not
+depend on a UI-only substitution for `52`.
 
 The current metadata shape is effectively:
 
@@ -57,6 +92,15 @@ number, identifiers, and timestamps. Product substitutions and user-facing
 labels that are not directly provided by the FIT profile should be derived in
 the UI/export layer so improved lookup tables can apply to old rows without a
 metadata backfill.
+
+For FIT activity type classification, also capture the FIT `sport` message name
+when present. If `session.sport` is numeric, unknown, or unresolved, and
+`sport.name` is a meaningful string such as `Stopwatch`, use that value for the
+canonical stored `activities.sport`, generated `activities.activity_name`, and
+`metadata_json.sport`. Preserve the original numeric session sport in metadata
+for diagnostics, for example `metadata_json.raw_sport_code = 52` or an
+equivalent `metadata_json.session.raw_sport_code` field. This keeps newly
+imported rows correct at the parser layer while retaining the raw FIT fact.
 
 Suggested metadata shape:
 
@@ -335,10 +379,28 @@ Display fallback order for a full accessory label:
 3. device type label
 4. `Unknown accessory`
 
+Primary device display fallback order:
+
+1. primary device entry from `metadata_json.device_info.devices[]`
+2. decoded `metadata_json.device_info.decoded_file_id` manufacturer/product
+   label, such as `Garmin Forerunner 255`
+3. legacy `activities.device`
+4. legacy `metadata_json.file_id.product_name`
+5. empty string
+
+This matters for sparse Stopwatch/manual-timer FIT files where `device_info`
+contains Garmin product `fr255` but lacks enough role fields to classify the
+record as `primary`. The UI and JSON export should still prefer the decoded
+file-id label over raw legacy text like `garmin fr255`.
+
 Examples from observed files:
 
 - Garmin product code `4606` with BLE type `heart_rate` remains raw product code
   metadata, but displays as `Garmin HRM 200`.
+- Garmin Forerunner 255 Stopwatch/manual-timer files may provide
+  `file_id.garmin_product = fr255` and a `device_info` record with the same
+  product but no `device_index`, `source_type`, or `device_type`; display the
+  primary device as `Garmin Forerunner 255` using the decoded file-id fallback.
 - Garmin product code `255` with ANT+ type `heart_rate` may be decoded by the SDK
   as `OHR`; when it is an external ANT+/Bluetooth heart-rate accessory, display
   it as `Garmin HRM 200`.

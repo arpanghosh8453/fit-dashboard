@@ -4,7 +4,10 @@ use anyhow::{anyhow, Context, Result};
 use fitparser::{profile::MesgNum, Value};
 use sha2::{Digest, Sha256};
 
-use crate::device_metadata::{build_devices, decoded_file_id, RawDeviceInfo, RawDeviceType, RawFileId};
+use crate::device_metadata::{
+    build_devices, decoded_file_id, decoded_file_id_display_name, RawDeviceInfo, RawDeviceType,
+    RawFileId,
+};
 use crate::models::{ParsedActivity, RecordPoint};
 
 const NON_ACTIVITY_FIT_MARKER: &str = "non-activity-fit:";
@@ -699,9 +702,13 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         file_id_product,
     );
 
+    let decoded_file_id_metadata = decoded_file_id(&raw_file_id);
+    let decoded_file_id_name = decoded_file_id_display_name(&decoded_file_id_metadata);
+
     if device.is_empty() {
         device = device_info_creator_name
             .clone()
+            .or(decoded_file_id_name)
             .or(file_id_combined_name.clone())
             .or(device_info_fallback_name.clone())
             .unwrap_or_default();
@@ -710,7 +717,6 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let resolved_serial_number = file_id_serial_number
         .or(device_info_creator_serial)
         .or(device_info_fallback_serial);
-    let decoded_file_id_metadata = decoded_file_id(&raw_file_id);
     let device_entries = build_devices(&raw_device_info_records);
 
     let metadata_json = serde_json::json!({

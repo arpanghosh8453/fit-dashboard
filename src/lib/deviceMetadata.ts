@@ -240,13 +240,30 @@ export function getPrimaryDevice(metadata: ActivityMetadata | null): DeviceMetad
   return metadata?.device_info?.devices?.find((device) => device.role === "primary") ?? null;
 }
 
+function decodedFileIdLabel(info?: DeviceInfoMetadata | null): string | null {
+  const decoded = info?.decoded_file_id;
+  if (!decoded) return null;
+
+  const manufacturer = decoded.manufacturer?.label
+    ?? labelFromIdentifier(decoded.manufacturer?.name)
+    ?? null;
+  const product = decoded.product?.label
+    ?? labelFromIdentifier(decoded.product?.name)
+    ?? null;
+  const label = [manufacturer, product].filter(Boolean).join(" ").trim();
+  return label || null;
+}
+
 export function getPrimaryDeviceLabel(
   metadata: ActivityMetadata | null,
   activity?: Pick<Activity, "device"> | null
 ): string {
   const primary = getPrimaryDevice(metadata);
   if (primary) return formatDeviceLabel(primary);
-  return activity?.device || metadata?.file_id?.product_name || "";
+  return decodedFileIdLabel(metadata?.device_info)
+    || activity?.device
+    || metadata?.file_id?.product_name
+    || "";
 }
 
 function buildExportDevice(device: DeviceMetadata) {
