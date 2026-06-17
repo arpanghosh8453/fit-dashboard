@@ -104,6 +104,8 @@
   "detail.calories": "Calorieën",
   "detail.laps": "Ronden",
   "detail.smoothGraphs": "Vloeiende grafieken",
+  "detail.chartXAxis": "X-as van grafiek",
+  "detail.distanceAxisUnavailable": "Afstandsas niet beschikbaar voor deze activiteit",
   "detail.resetZoom": "Zoom resetten",
   "detail.heartRateAndPace": "Hartslag en tempo",
   "detail.selectActivity": "Selecteer een activiteit in de zijbalk.",

@@ -104,6 +104,8 @@
   "detail.calories": "卡路里",
   "detail.laps": "圈数",
   "detail.smoothGraphs": "平滑图表",
+  "detail.chartXAxis": "图表 X 轴",
+  "detail.distanceAxisUnavailable": "此活动无法使用距离轴",
   "detail.resetZoom": "重置缩放",
   "detail.heartRateAndPace": "心率与配速",
   "detail.selectActivity": "从侧边栏选择一项活动。",

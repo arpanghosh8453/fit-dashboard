@@ -30,6 +30,7 @@ import {
   speedLabel,
 } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
+import { hasUsableDistanceAxis, type TelemetryTimerMetadata, type TelemetryXAxisMode } from "../lib/telemetryAxis";
 
 type Props = { onLogout: () => Promise<void> };
 
@@ -47,6 +48,7 @@ type ActivityMetadata = {
   activity_metrics?: {
     vo2_max?: number | null;
   };
+  timer?: TelemetryTimerMetadata | null;
   session?: {
     beginning_body_battery?: number | null;
     ending_body_battery?: number | null;
@@ -318,6 +320,7 @@ export function Dashboard({ onLogout }: Props) {
     x: number; y: number; activityId: number; activityName: string;
   } | null>(null);
   const [telemetryZoom, setTelemetryZoom] = useState<{ start: number; end: number } | null>(null);
+  const [telemetryXAxisMode, setTelemetryXAxisMode] = useState<TelemetryXAxisMode>("time");
   const [smoothGraphs, setSmoothGraphs] = useState(true);
   const [appVersion, setAppVersion] = useState("unknown");
   const [versionBadgeStatus, setVersionBadgeStatus] = useState<VersionBadgeStatus>({ state: "hidden", latestVersion: null });
@@ -481,6 +484,7 @@ export function Dashboard({ onLogout }: Props) {
   const filteredSports = Array.from(new Set(filtered.map((a) => a.sport).filter(Boolean)));
   const filteredDevices = Array.from(new Set(filtered.map((a) => a.device).filter(Boolean)));
   const selectedRecords = tab === "overview" ? overviewRecords : records;
+  const hasTelemetryDistanceAxis = useMemo(() => hasUsableDistanceAxis(records), [records]);
   const distanceDivisorValue = distanceDivisor(distanceUnit);
   const distanceSuffix = distanceLabel(distanceUnit);
   const filteredTotalDistanceM = filtered.reduce((sum, a) => sum + a.distance_m, 0);
@@ -1022,9 +1026,12 @@ export function Dashboard({ onLogout }: Props) {
       .filter((ts) => !!ts),
     [selectedMetadata]
   );
-  const deviceBadgeSerial = typeof selectedMetadata?.file_id?.serial_number === "number"
-    ? String(selectedMetadata.file_id.serial_number)
-    : "";
+
+  useEffect(() => {
+    if (selectedActivity && records.length > 0 && !hasTelemetryDistanceAxis && telemetryXAxisMode === "distance") {
+      setTelemetryXAxisMode("time");
+    }
+  }, [selectedActivity, records.length, hasTelemetryDistanceAxis, telemetryXAxisMode]);
   const detailStats = useMemo(() => {
     if (!selectedActivity) return [] as Array<{ key: string; label: string; value: string; secondary?: string; icon: Icon }>;
     const out: Array<{ key: string; label: string; value: string; secondary?: string; icon: Icon }> = [];
@@ -1563,7 +1570,24 @@ export function Dashboard({ onLogout }: Props) {
                   <div className="detail-badges">
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
                     {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
-                    {deviceBadgeSerial && <span className="badge device">SN {deviceBadgeSerial}</span>}
+                    <div className="detail-axis-toggle" aria-label={t("detail.chartXAxis")}>
+                      <button
+                        type="button"
+                        className={telemetryXAxisMode === "time" ? "active" : ""}
+                        onClick={() => setTelemetryXAxisMode("time")}
+                      >
+                        {t("detail.time")}
+                      </button>
+                      <button
+                        type="button"
+                        className={telemetryXAxisMode === "distance" ? "active" : ""}
+                        onClick={() => hasTelemetryDistanceAxis && setTelemetryXAxisMode("distance")}
+                        disabled={!hasTelemetryDistanceAxis}
+                        title={!hasTelemetryDistanceAxis ? t("detail.distanceAxisUnavailable") : undefined}
+                      >
+                        {t("detail.distance")}
+                      </button>
+                    </div>
                     <label className="detail-toggle-badge" title={t("detail.smoothGraphsTooltip")}>
                       <input
                         type="checkbox"
@@ -1601,10 +1625,10 @@ export function Dashboard({ onLogout }: Props) {
                 </div>
               </div>
               <div className="detail-grid">
-                <div className="panel"><h3>{t("detail.heartRateAndPace")}</h3><ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} /></div>
+                <div className="panel"><h3>{t("detail.heartRateAndPace")}</h3><ActivityChart records={selectedRecords} theme={theme} distanceUnit={distanceUnit} xAxisMode={telemetryXAxisMode} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} timerMetadata={selectedMetadata?.timer} /></div>
                 <ActivityMap records={selectedRecords} mapStyle={mapStyle} setMapStyle={setMapStyle} lapTimestampsUtc={lapTimestampsUtc} />
               </div>
-              <ActivityInsights records={selectedRecords} theme={theme} distanceUnit={distanceUnit} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} />
+              <ActivityInsights records={selectedRecords} theme={theme} distanceUnit={distanceUnit} xAxisMode={telemetryXAxisMode} heartRateZoneBoundsBpm={selectedMetadata?.heart_rate_zone_bounds_bpm} zoomRange={telemetryZoom} onZoomChange={setTelemetryZoom} lapTimestampsUtc={lapTimestampsUtc} smoothGraphs={smoothGraphs} timerMetadata={selectedMetadata?.timer} />
               {lapRows.length > 0 && (
                 <div className="panel laps-table-panel">
                   <h3>{t("detail.laps")}</h3>

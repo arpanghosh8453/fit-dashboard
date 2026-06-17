@@ -104,6 +104,8 @@
   "detail.calories": "Kalorien",
   "detail.laps": "Runden",
   "detail.smoothGraphs": "Glatte Diagramme",
+  "detail.chartXAxis": "Diagramm-X-Achse",
+  "detail.distanceAxisUnavailable": "Distanzachse für diese Aktivität nicht verfügbar",
   "detail.resetZoom": "Zoom zurücksetzen",
   "detail.heartRateAndPace": "Herzfrequenz und Tempo",
   "detail.selectActivity": "Wählen Sie eine Aktivität aus der Seitenleiste.",

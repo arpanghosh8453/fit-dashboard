@@ -104,6 +104,8 @@
   "detail.calories": "Kalorie",
   "detail.laps": "Okrążenia",
   "detail.smoothGraphs": "Wygładzone wykresy",
+  "detail.chartXAxis": "Oś X wykresu",
+  "detail.distanceAxisUnavailable": "Oś dystansu niedostępna dla tej aktywności",
   "detail.resetZoom": "Resetuj zoom",
   "detail.heartRateAndPace": "Tętno i tempo",
   "detail.selectActivity": "Wybierz aktywność z panelu bocznego.",

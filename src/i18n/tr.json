@@ -104,6 +104,8 @@
   "detail.calories": "Kalori",
   "detail.laps": "Turlar",
   "detail.smoothGraphs": "Yumuşak grafikler",
+  "detail.chartXAxis": "Grafik X ekseni",
+  "detail.distanceAxisUnavailable": "Bu aktivite için mesafe ekseni kullanılamaz",
   "detail.resetZoom": "Yakınlaştırmayı sıfırla",
   "detail.heartRateAndPace": "Kalp Atış Hızı ve Tempo",
   "detail.selectActivity": "Kenar çubuğundan bir aktivite seçin.",

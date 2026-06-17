@@ -104,6 +104,8 @@
   "detail.calories": "Calorías",
   "detail.laps": "Vueltas",
   "detail.smoothGraphs": "Gráficos suavizados",
+  "detail.chartXAxis": "Eje X del gráfico",
+  "detail.distanceAxisUnavailable": "Eje de distancia no disponible para esta actividad",
   "detail.resetZoom": "Restablecer zoom",
   "detail.heartRateAndPace": "Frecuencia cardíaca y ritmo",
   "detail.selectActivity": "Seleccione una actividad de la barra lateral.",

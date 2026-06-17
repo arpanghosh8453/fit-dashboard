@@ -104,6 +104,8 @@
   "detail.calories": "カロリー",
   "detail.laps": "ラップ",
   "detail.smoothGraphs": "スムーズグラフ",
+  "detail.chartXAxis": "グラフのX軸",
+  "detail.distanceAxisUnavailable": "このアクティビティでは距離軸を使用できません",
   "detail.resetZoom": "ズームをリセット",
   "detail.heartRateAndPace": "心拍数とペース",
   "detail.selectActivity": "サイドバーからアクティビティを選択してください。",

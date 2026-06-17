@@ -104,6 +104,8 @@
   "detail.calories": "Calories",
   "detail.laps": "Tours",
   "detail.smoothGraphs": "Graphiques lissés",
+  "detail.chartXAxis": "Axe X du graphique",
+  "detail.distanceAxisUnavailable": "Axe de distance indisponible pour cette activité",
   "detail.resetZoom": "Réinitialiser le zoom",
   "detail.heartRateAndPace": "Fréquence cardiaque et allure",
   "detail.selectActivity": "Sélectionnez une activité dans la barre latérale.",
