@@ -104,6 +104,8 @@
   "detail.calories": "Kalória",
   "detail.laps": "Körök",
   "detail.smoothGraphs": "Simított grafikonok",
+  "detail.chartXAxis": "Grafikon X tengelye",
+  "detail.distanceAxisUnavailable": "A távolságtengely nem érhető el ehhez a tevékenységhez",
   "detail.resetZoom": "Zoom visszaállítás",
   "detail.heartRateAndPace": "Pulzus és tempó",
   "detail.selectActivity": "Válasszon tevékenységet az oldalsávból.",

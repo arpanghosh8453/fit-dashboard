@@ -111,6 +111,8 @@
   "detail.calories": "Калории",
   "detail.laps": "Круги",
   "detail.smoothGraphs": "Сглаживание графиков",
+  "detail.chartXAxis": "Ось X графика",
+  "detail.distanceAxisUnavailable": "Ось дистанции недоступна для этой активности",
   "detail.resetZoom": "Сбросить масштаб",
   "detail.heartRateAndPace": "Пульс и темп",
   "detail.selectActivity": "Выберите активность на боковой панели для просмотра подробной телеметрии.",
