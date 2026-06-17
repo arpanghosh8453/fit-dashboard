@@ -1,33 +1,38 @@
-# Daily Suggested Workouts Investigation
+# Garmin Planned Workouts Investigation
 
 ## Summary
 
-Garmin Daily Suggested Workout activities import as regular activities today, but
-their FIT files contain extra planned-workout metadata. That metadata can support
-a workout-aware interval table instead of showing only generic laps.
+Garmin planned workout activities import as regular activities today, but their
+FIT files contain extra planned-workout metadata. This applies to both Daily
+Suggested Workouts and Garmin Coaching Plan workouts. The preserved metadata can
+support a workout-aware interval table instead of showing only generic laps.
 
-This document records current findings from sample files.
+This document records current findings from sample files. It keeps the original
+Daily Suggested Workout examples and adds a Garmin Coaching Plan cycling sample
+that uses the same FIT structures.
 
 The investigation focused on:
 
-- `20122336922_ACTIVITY.fit` - cycling sprint workout
-- `22730347417_ACTIVITY.fit` - running base workout
-- `23122091367_ACTIVITY.fit` - running sprint workout
-- matching Garmin Connect GPX and TCX exports for the same activities
+- `20122336922_ACTIVITY.fit` - Daily Suggested cycling sprint workout
+- `22730347417_ACTIVITY.fit` - Daily Suggested running base workout
+- `23122091367_ACTIVITY.fit` - Daily Suggested running sprint workout
+- `23259835588_ACTIVITY.fit` - Garmin Coaching Plan cycling sprint workout
+- matching Garmin Connect GPX and TCX exports for the Daily Suggested examples
 
 ## Current App Behaviour
 
-On the `daily_workouts` branch, the current parser imports these FIT files as
-normal activities. Regular telemetry, session summaries, and lap summaries are
-available.
+On the `feature-33-daily-workouts` branch, the current parser imports these
+FIT files as normal activities. Regular telemetry, session summaries, and lap
+summaries are available.
 
-The current parser does not preserve the Daily Suggested Workout structure:
+The current parser does not preserve the Garmin planned-workout structure:
 
 - `Workout.wkt_name`
+- `Workout.wkt_description`
 - `Workout.num_valid_steps`
 - `WorkoutStep` definitions
 - `Lap.wkt_step_index`
-- lap `intensity`
+- lap `intensity`, when present
 
 As a result, FIT Dashboard cannot currently show Garmin-style `Intervals`
 tables for these activities.
@@ -42,17 +47,29 @@ The samples contain a `Workout` message:
 
 ```text
 Workout.wkt_name
+Workout.wkt_description
 Workout.num_valid_steps
 Workout.sport
 ```
 
-Example:
+Daily Suggested running example:
 
 ```json
 {
   "wkt_name": "Sprint",
   "num_valid_steps": 5,
   "sport": "running"
+}
+```
+
+Garmin Coaching Plan cycling example:
+
+```json
+{
+  "wkt_name": "Sprint",
+  "wkt_description": "2x16x0:10@355W",
+  "num_valid_steps": 7,
+  "sport": "cycling"
 }
 ```
 
@@ -70,14 +87,18 @@ WorkoutStep.custom_target_value_high
 WorkoutStep.intensity
 ```
 
-Examples of planned-workout step names found in raw FIT strings:
+Examples of planned-workout descriptions or step strings found in raw FIT
+strings:
 
 ```text
 2x15x0:10@360W
+2x16x0:10@355W
 5x0:10@3:25/km
 ```
 
-The first means two sets of fifteen 10-second sprint efforts at 360 W.
+The first two describe cycling sprint workouts. The first means two sets of
+fifteen 10-second sprint efforts at 360 W; the Coaching Plan sample uses two
+sets of sixteen 10-second sprint efforts at 355 W.
 
 FIT lap messages link recorded laps back to planned workout steps with:
 
@@ -97,7 +118,7 @@ avg_power
 normalized_power
 ```
 
-`lap_trigger` is not unique to Daily Suggested Workouts. It is also present on
+`lap_trigger` is not unique to Garmin planned workouts. It is also present on
 regular activities. It tells why a lap ended, such as `distance`, `time`, or
 `session_end`.
 
@@ -122,18 +143,20 @@ GPX does not preserve the interval/workout-step structure.
 ### TCX
 
 The TCX exports appear to preserve normal lap and trackpoint data, but not the
-Daily Suggested Workout structure. A quick text scan did not find workout names,
-step names, or interval labels comparable to the FIT workout metadata.
+planned-workout structure. A quick text scan did not find workout names, step
+names, or interval labels comparable to the FIT workout metadata.
 
-## Unique Daily Suggested Workout Fields
+## Unique Garmin Planned Workout Fields
 
-Compared with a regular cycling FIT sample, `23060547104_ACTIVITY.fit`, the Daily Suggested Workout-specific fields are:
+Compared with a regular cycling FIT sample, `23060547104_ACTIVITY.fit`, the
+planned-workout-specific fields are:
 
 ```text
 workout
 workout.num_valid_steps
 workout.sport
 workout.wkt_name
+workout.wkt_description
 
 workout_step
 workout_step.message_index
@@ -149,19 +172,20 @@ workout_step.intensity
 laps[].wkt_step_index
 ```
 
-Fields such as `lap_trigger`, lap time, lap distance, lap power, lap heart rate,
-and lap calories are useful for display but are not unique to Daily Suggested
-Workouts.
+Fields such as `lap_trigger`, lap time, lap distance, lap power, lap heart
+rate, lap calories, and lap `normalized_power` are useful for display but are
+not unique to Garmin planned workouts.
 
 ## Reconstructing Garmin-Style Interval Tables
 
-Garmin Connect labels the table as `Intervals`, not `Laps`, for these workouts.
-The displayed rows are partly recorded laps and partly derived workout-step
-summary rows.
+Garmin Connect labels the table as `Intervals`, not `Laps`, for these
+planned workouts. The displayed rows are partly recorded laps and partly derived
+workout-step summary rows.
 
 The table can be reconstructed from:
 
 - `Workout.wkt_name`
+- `Workout.wkt_description`
 - `WorkoutStep.message_index`
 - `WorkoutStep.wkt_step_name`
 - `WorkoutStep.duration_type`
@@ -169,8 +193,10 @@ The table can be reconstructed from:
 - `WorkoutStep.target_type`
 - `WorkoutStep.custom_target_value_low/high`
 - `WorkoutStep.intensity`
+- `WorkoutStep.repeat_steps`
+- `WorkoutStep.duration_step`
 - `Lap.wkt_step_index`
-- lap `intensity`
+- lap `intensity`, when present
 - lap `lap_trigger`
 - lap order
 - lap `total_timer_time`
@@ -187,14 +213,14 @@ workout metadata found in the same file.
 
 Process used:
 
-1. Read the `Workout` message to identify the workout name, sport, and planned
-   step count.
+1. Read the `Workout` message to identify the workout name, description,
+   sport, and planned step count.
 2. Read all `WorkoutStep` messages. Each step is keyed by
    `WorkoutStep.message_index`.
 3. Read all `Lap` messages in chronological order.
 4. For each lap, read:
    - `wkt_step_index`
-   - `intensity`
+   - `intensity`, when present
    - `lap_trigger`
    - `total_timer_time`
    - `total_distance`
@@ -204,10 +230,11 @@ Process used:
    Lap.wkt_step_index == WorkoutStep.message_index
    ```
 
-6. Derive the displayed row type:
+6. Derive the displayed row type from the matched `WorkoutStep.intensity`.
+   Use lap `intensity` only as a fallback when it is present:
    - `warmup` -> `Warm Up`
    - `interval` -> sport-specific work label such as `Run` or `Bike`
-   - `rest` -> `Recovery`
+   - `rest` or `recovery` -> `Recovery`
    - `cooldown` -> `Cool Down`
 7. Number repeated work/recovery pairs by chronological occurrence. For the
    running sprint sample, each `interval` lap followed by a `rest` lap becomes
@@ -221,8 +248,13 @@ Process used:
 Notes:
 
 - A final `session_end` lap may have an `intensity` but no `wkt_step_index`.
-  For the sample below, it is grouped with cooldown because it has
+  For the running sample below, it is grouped with cooldown because it has
   `intensity=cooldown` and immediately follows the planned cooldown step.
+- Lap `intensity` is optional. In the Garmin Coaching Plan cycling sample,
+  all 67 lap messages include the field but its value is null. In that case,
+  row labels must come from the matched `WorkoutStep.intensity`.
+- Repeat/control workout steps, such as `repeat_until_steps_cmplt`, describe
+  planned repetition structure and may not map directly to recorded laps.
 - Garmin Connect may use additional internal logic for exact grouping. The goal
   here is to preserve enough fields that FIT Dashboard can reproduce a close,
   deterministic interval table.
@@ -294,7 +326,56 @@ Reconstructed table:
 | Cool Down | 15 | 15 | 0:02.2 | 37:52.2 | 0.01 |
 
 The final 2.2-second `session_end` lap has `intensity=cooldown` but no
-`wkt_step_index`. The planned cooldown step itself is 10:00 across laps 13 and 14. Garmins add lap 15 as Cool Down as well.
+`wkt_step_index`. The planned cooldown step itself is 10:00 across laps 13 and
+14. Garmin adds lap 15 as Cool Down as well.
+
+## Garmin Coaching Plan Cycling Sprint Sample
+
+Source file:
+
+```text
+23259835588_ACTIVITY.fit
+```
+
+Workout:
+
+```json
+{
+  "wkt_name": "Sprint",
+  "wkt_description": "2x16x0:10@355W",
+  "num_valid_steps": 7,
+  "sport": "cycling",
+  "sub_sport": "generic"
+}
+```
+
+Workout steps:
+
+| Step | Intensity | Duration Type | Duration | Repeat | Target |
+|---:|---|---|---:|---:|---|
+| 0 | warmup | time | 20:00 |  | 3s power 111-152 W |
+| 1 | interval | time | 0:10 |  | 3s power 304-405 W |
+| 2 | recovery | time | 0:20 |  | 3s power 1-132 W |
+| 3 | active | repeat_until_steps_cmplt |  | 16 | repeat control from step 1 |
+| 4 | recovery | time | 5:00 |  | 3s power 91-132 W |
+| 5 | active | repeat_until_steps_cmplt |  | 2 | repeat control from step 1 |
+| 6 | cooldown | time | 15:00 |  | 3s power 91-132 W |
+
+Recorded lap mapping:
+
+| wkt_step_index | Matched Step | Lap Count | Notes |
+|---:|---|---:|---|
+| 0 | warmup | 2 | first lap ends by distance, second by time |
+| 1 | interval | 32 | 10-second cycling sprint efforts |
+| 2 | recovery | 30 | 20-second short recoveries |
+| 4 | recovery | 1 | 5-minute recovery between sprint sets |
+| 6 | cooldown | 1 | planned cooldown |
+| none | none | 1 | final `session_end` lap |
+
+The Garmin Coaching Plan sample confirms that the same FIT structures are not
+limited to Daily Suggested Workouts. It also shows why `WorkoutStep.intensity`
+should be the primary label source: lap `intensity` is null for every lap in
+this file.
 
 ## Activity Naming Considerations
 
@@ -309,7 +390,7 @@ Icon: cycling
 Subtext: Road Cycling
 ```
 
-Observed Daily Suggested Workout road-cycling display:
+Observed Garmin planned-workout road-cycling display:
 
 ```text
 Title: Calgary - Sprint
@@ -340,8 +421,8 @@ naming behaviour.
 
 ## Execution Score
 
-Garmin Connect shows an execution score for Daily Suggested Workouts. I did not
-find an explicit decoded field named execution score, adherence score,
+Garmin Connect shows an execution score for at least some planned workouts. I
+did not find an explicit decoded field named execution score, adherence score,
 compliance score, or similar in the known fields exposed by the JavaScript FIT
 parser used for investigation.
 
@@ -382,9 +463,10 @@ Known sample values:
 
 ## Open Questions
 
-- Can Rust `fitparser` expose all `WorkoutStep` messages with names and target
-  ranges? The JavaScript parser used in investigation collapsed repeated
-  `WorkoutStep` messages into a single `workout_step` object.
+- Can Rust `fitparser` expose all `Workout` and `WorkoutStep` messages,
+  including repeat/control fields, descriptions, intensities, and target ranges?
+  The JavaScript parser used in investigation collapsed repeated `WorkoutStep`
+  messages into a single `workout_step` object.
 - Are Garmin Connect execution scores present in standard FIT fields that
   require additional enum decoding, or are they only available through Garmin
   Connect outside the exported FIT?
