@@ -59,6 +59,7 @@ type ActivityMetadata = {
     total_elapsed_time_s?: number | null;
     total_distance_m?: number | null;
     total_calories?: number | null;
+    normalized_power?: number | null;
   };
   laps?: Array<{
     start_ts_utc?: string | null;
@@ -76,6 +77,7 @@ type ActivityMetadata = {
     max_cadence?: number | null;
     total_calories?: number | null;
     best_speed_m_s?: number | null;
+    normalized_power?: number | null;
   }>;
 };
 
@@ -107,6 +109,11 @@ function formatPace(secondsPerUnit: number, unit: string): string {
 function shortenFileName(name: string, maxLength = 45): string {
   if (name.length <= maxLength) return name;
   return `${name.slice(0, maxLength)}...`;
+}
+
+function isCyclingSport(sport: string | null | undefined): boolean {
+  const normalized = String(sport ?? "").trim().toLowerCase().replace(/[ -]/g, "_");
+  return normalized.includes("cycling") || normalized.includes("biking") || normalized.includes("bike");
 }
 
 function parseActivityMetadata(raw?: string): ActivityMetadata | null {
@@ -1020,6 +1027,13 @@ export function Dashboard({ onLogout }: Props) {
     () => parseActivityMetadata(selectedActivity?.metadata_json),
     [selectedActivity?.metadata_json]
   );
+  const isSelectedCycling = isCyclingSport(selectedActivity?.sport);
+  const rawSessionNormalizedPower = selectedMetadata?.session?.normalized_power;
+  const sessionNormalizedPower = isSelectedCycling
+    && typeof rawSessionNormalizedPower === "number"
+    && rawSessionNormalizedPower > 0
+    ? rawSessionNormalizedPower
+    : null;
   const lapTimestampsUtc = useMemo(
     () => (selectedMetadata?.laps ?? [])
       .map((lap) => lap.start_ts_utc ?? lap.end_ts_utc ?? "")
@@ -1061,6 +1075,7 @@ export function Dashboard({ onLogout }: Props) {
 
     if (recordStats.maxAlt > 0) push("max_alt", t("detail.maxAltitude"), `${convertElevationMeters(recordStats.maxAlt, distanceUnit).toFixed(0)} ${elevationLabel(distanceUnit)}`, "mountain");
     if (recordStats.avgPower > 0) push("avg_power", t("detail.avgPower"), `${Math.round(recordStats.avgPower)} W`, "power");
+    if (sessionNormalizedPower !== null) push("normalized_power", t("detail.normalizedPower"), `${Math.round(sessionNormalizedPower)} W`, "power");
 
     if (typeof session.avg_cadence === "number" && session.avg_cadence > 0) push("avg_cadence", t("detail.avgCadence"), `${Math.round(session.avg_cadence)} rpm`, "cadence");
     if (typeof session.max_cadence === "number" && session.max_cadence > 0) push("max_cadence", t("detail.maxCadence"), `${Math.round(session.max_cadence)} rpm`, "cadence");
@@ -1080,7 +1095,7 @@ export function Dashboard({ onLogout }: Props) {
     if (lapTimestampsUtc.length > 0) push("laps", t("detail.laps"), String(lapTimestampsUtc.length), "avg");
 
     return out;
-  }, [selectedActivity, selectedMetadata, recordStats, distanceDivisorValue, distanceSuffix, distanceUnit, lapTimestampsUtc.length, t]);
+  }, [selectedActivity, selectedMetadata, recordStats, distanceDivisorValue, distanceSuffix, distanceUnit, sessionNormalizedPower, lapTimestampsUtc.length, t]);
 
   const lapRows = useMemo(() => {
     const laps = selectedMetadata?.laps ?? [];
@@ -1110,10 +1125,12 @@ export function Dashboard({ onLogout }: Props) {
         descentMeters: lap.total_descent_m,
         avgCadence: lap.avg_cadence,
         calories: lap.total_calories,
+        normalizedPower: lap.normalized_power,
         bestPace,
       };
     });
   }, [selectedMetadata?.laps, distanceDivisorValue, distanceSuffix]);
+  const showLapNormalizedPower = isSelectedCycling && lapRows.some((lap) => typeof lap.normalizedPower === "number" && lap.normalizedPower > 0);
 
   return (
     <div className="app-shell">
@@ -1641,6 +1658,7 @@ export function Dashboard({ onLogout }: Props) {
                           <th>{t("detail.cumulativeTime")}</th>
                           <th>{t("detail.distance")}</th>
                           <th>{t("detail.avgPace")}</th>
+                          {showLapNormalizedPower && <th title={t("detail.normalizedPower")}>NP</th>}
                           <th>{t("detail.avgHr")}</th>
                           <th>{t("detail.maxHr")}</th>
                           <th>{t("detail.totalAscent")}</th>
@@ -1657,6 +1675,7 @@ export function Dashboard({ onLogout }: Props) {
                             <td>{formatDuration(lap.cumulativeSeconds)}</td>
                             <td>{lap.distanceMeters != null ? `${(lap.distanceMeters / distanceDivisorValue).toFixed(2)} ${distanceSuffix}` : "-"}</td>
                             <td>{lap.avgPace}</td>
+                            {showLapNormalizedPower && <td>{typeof lap.normalizedPower === "number" && lap.normalizedPower > 0 ? `${Math.round(lap.normalizedPower)} W` : "-"}</td>}
                             <td>{typeof lap.avgHr === "number" ? Math.round(lap.avgHr) : "-"}</td>
                             <td>{typeof lap.maxHr === "number" ? Math.round(lap.maxHr) : "-"}</td>
                             <td>{typeof lap.ascentMeters === "number" ? `${Math.round(convertElevationMeters(lap.ascentMeters, distanceUnit))} ${elevationLabel(distanceUnit)}` : "-"}</td>
@@ -1680,6 +1699,7 @@ export function Dashboard({ onLogout }: Props) {
                             const t = lapRows.reduce((a, b) => a + (b.lapTimeSec || 0), 0);
                             return d > 0 && t > 0 ? formatPace((distanceDivisorValue / (d / t)), distanceSuffix) : "-";
                           })()}</td>
+                          {showLapNormalizedPower && <td>{sessionNormalizedPower !== null ? `${Math.round(sessionNormalizedPower)} W` : "-"}</td>}
                           <td>{(() => {
                             const hrs = lapRows.map(l => l.avgHr).filter((h): h is number => typeof h === "number");
                             return hrs.length > 0 ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : "-";

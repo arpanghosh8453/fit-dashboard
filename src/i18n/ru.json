@@ -104,6 +104,7 @@
   "detail.maxHr": "Макс. ЧСС",
   "detail.maxAltitude": "Макс. высота",
   "detail.avgPower": "Средняя мощность",
+  "detail.normalizedPower": "Нормализованная мощность",
   "detail.avgCadence": "Средний каденс",
   "detail.maxCadence": "Макс. каденс",
   "detail.bodyBatteryChange": "Изменение энергии (Body Battery)",

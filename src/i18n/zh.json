@@ -97,6 +97,7 @@
   "detail.maxHr": "最大心率",
   "detail.maxAltitude": "最大海拔",
   "detail.avgPower": "平均功率",
+  "detail.normalizedPower": "标准化功率",
   "detail.avgCadence": "平均步频",
   "detail.maxCadence": "最大步频",
   "detail.bodyBatteryChange": "Body Battery 变化",

@@ -532,6 +532,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut session_total_timer_time_sum_s: Option<f64> = None;
     let mut session_total_distance_m: Option<f64> = None;
     let mut session_total_calories: Option<i64> = None;
+    let mut session_normalized_power: Option<i64> = None;
     let mut activity_total_timer_time_s: Option<f64> = None;
     let mut lap_total_timer_time_sum_s: Option<f64> = None;
     let mut lap_ranges: Vec<serde_json::Value> = Vec::new();
@@ -635,6 +636,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     }
                     "total_distance" => session_total_distance_m = value_f64(field.value()),
                     "total_calories" => session_total_calories = value_i64(field.value()),
+                    "normalized_power" => session_normalized_power = value_i64(field.value()),
                     _ => {}
                 }
             }
@@ -786,6 +788,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             let mut lap_max_cadence: Option<i64> = None;
             let mut lap_total_calories: Option<i64> = None;
             let mut lap_best_speed_m_s: Option<f64> = None;
+            let mut lap_normalized_power: Option<i64> = None;
             for field in rec.fields() {
                 match field.name() {
                     "start_time" => lap_start_ms = value_timestamp_ms(field.value()),
@@ -818,6 +821,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "avg_cadence" => lap_avg_cadence = value_i64(field.value()),
                     "max_cadence" => lap_max_cadence = value_i64(field.value()),
                     "total_calories" => lap_total_calories = value_i64(field.value()),
+                    "normalized_power" => lap_normalized_power = value_i64(field.value()),
                     _ => {}
                 }
             }
@@ -845,7 +849,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                 "avg_cadence": lap_avg_cadence,
                 "max_cadence": lap_max_cadence,
                 "total_calories": lap_total_calories,
-                "best_speed_m_s": lap_best_speed_m_s
+                "best_speed_m_s": lap_best_speed_m_s,
+                "normalized_power": lap_normalized_power
             }));
         }
 
@@ -983,7 +988,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             "total_elapsed_time_s": session_total_elapsed_time_sum_s,
             "total_timer_time_s": session_total_timer_time_sum_s,
             "total_distance_m": session_total_distance_m,
-            "total_calories": session_total_calories
+            "total_calories": session_total_calories,
+            "normalized_power": session_normalized_power
         },
         "laps": lap_ranges
     })

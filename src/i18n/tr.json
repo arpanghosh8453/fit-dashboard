@@ -97,6 +97,7 @@
   "detail.maxHr": "Maks. KAH",
   "detail.maxAltitude": "Maks. Yükseklik",
   "detail.avgPower": "Ort. Güç",
+  "detail.normalizedPower": "Normalize güç",
   "detail.avgCadence": "Ort. Kadans",
   "detail.maxCadence": "Maks. Kadans",
   "detail.bodyBatteryChange": "Body Battery Değişimi",

@@ -97,6 +97,7 @@
   "detail.maxHr": "Max. HF",
   "detail.maxAltitude": "Max. hoogte",
   "detail.avgPower": "Gem. vermogen",
+  "detail.normalizedPower": "Genormaliseerd vermogen",
   "detail.avgCadence": "Gem. cadans",
   "detail.maxCadence": "Max. cadans",
   "detail.bodyBatteryChange": "Body Battery wijziging",

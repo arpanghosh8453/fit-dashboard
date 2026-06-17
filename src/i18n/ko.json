@@ -97,6 +97,7 @@
   "detail.maxHr": "최대 심박",
   "detail.maxAltitude": "최대 고도",
   "detail.avgPower": "평균 파워",
+  "detail.normalizedPower": "정규화 파워",
   "detail.avgCadence": "평균 케이던스",
   "detail.maxCadence": "최대 케이던스",
   "detail.bodyBatteryChange": "Body Battery 변화",

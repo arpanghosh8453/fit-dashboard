@@ -97,6 +97,7 @@
   "detail.maxHr": "Maks. tętno",
   "detail.maxAltitude": "Maks. wysokość",
   "detail.avgPower": "Śr. moc",
+  "detail.normalizedPower": "Moc znormalizowana",
   "detail.avgCadence": "Śr. kadencja",
   "detail.maxCadence": "Maks. kadencja",
   "detail.bodyBatteryChange": "Zmiana Body Battery",

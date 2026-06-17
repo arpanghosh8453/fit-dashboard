@@ -104,6 +104,7 @@
   "detail.maxHr": "Max HR",
   "detail.maxAltitude": "Max Altitude",
   "detail.avgPower": "Avg Power",
+  "detail.normalizedPower": "Normalized Power",
   "detail.avgCadence": "Avg Cadence",
   "detail.maxCadence": "Max Cadence",
   "detail.bodyBatteryChange": "Body Battery Change",

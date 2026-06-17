@@ -97,6 +97,7 @@
   "detail.maxHr": "Max. pulzus",
   "detail.maxAltitude": "Max. magasság",
   "detail.avgPower": "Átl. teljesítmény",
+  "detail.normalizedPower": "Normalizált teljesítmény",
   "detail.avgCadence": "Átl. lépésfreki",
   "detail.maxCadence": "Max. lépésfrekv.",
   "detail.bodyBatteryChange": "Body Battery változás",

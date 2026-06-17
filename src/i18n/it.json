@@ -97,6 +97,7 @@
   "detail.maxHr": "FC max",
   "detail.maxAltitude": "Alt. max",
   "detail.avgPower": "Pot. media",
+  "detail.normalizedPower": "Potenza normalizzata",
   "detail.avgCadence": "Cadenza media",
   "detail.maxCadence": "Cadenza max",
   "detail.bodyBatteryChange": "Variazione Body Battery",

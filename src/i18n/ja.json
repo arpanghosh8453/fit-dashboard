@@ -97,6 +97,7 @@
   "detail.maxHr": "最大心拍",
   "detail.maxAltitude": "最大標高",
   "detail.avgPower": "平均パワー",
+  "detail.normalizedPower": "正規化パワー",
   "detail.avgCadence": "平均ケイデンス",
   "detail.maxCadence": "最大ケイデンス",
   "detail.bodyBatteryChange": "Body Battery変化",

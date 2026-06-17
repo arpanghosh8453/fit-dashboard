@@ -97,6 +97,7 @@
   "detail.maxHr": "Max. HF",
   "detail.maxAltitude": "Max. Höhe",
   "detail.avgPower": "Ø Leistung",
+  "detail.normalizedPower": "Normalisierte Leistung",
   "detail.avgCadence": "Ø Trittfrequenz",
   "detail.maxCadence": "Max. Trittfrequenz",
   "detail.bodyBatteryChange": "Body Battery Änderung",
