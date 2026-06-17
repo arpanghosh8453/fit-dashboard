@@ -10,18 +10,36 @@ import {
   speedLabel,
   type DistanceUnit,
 } from "../lib/units";
+import {
+  buildLapMarkers,
+  buildTelemetryPoints,
+  buildTelemetryXAxisBounds,
+  formatRelTime,
+  formatTelemetryTooltipHeader,
+  formatTelemetryXAxisTick,
+  type TelemetryTimerMetadata,
+  type TelemetryXAxisMode,
+} from "../lib/telemetryAxis";
 import { useTranslation } from "../lib/i18n";
 
 type Props = {
   records: RecordPoint[];
   theme: "light" | "dark";
   distanceUnit: DistanceUnit;
+  xAxisMode?: TelemetryXAxisMode;
   heartRateZoneBoundsBpm?: number[];
   zoomRange?: { start: number; end: number } | null;
   onZoomChange?: (range: { start: number; end: number }) => void;
   lapTimestampsUtc?: string[];
   smoothGraphs?: boolean;
+  timerMetadata?: TelemetryTimerMetadata | null;
 };
+
+type SeriesRow = [number, number | null, number, number, number | null];
+
+function isSeriesRow(row: [number | null, number | null, number, number, number | null]): row is SeriesRow {
+  return typeof row[0] === "number" && Number.isFinite(row[0]);
+}
 
 function safeAvg(values: Array<number | null | undefined>): number | null {
   const nums = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
@@ -29,36 +47,19 @@ function safeAvg(values: Array<number | null | undefined>): number | null {
   return nums.reduce((sum, n) => sum + n, 0) / nums.length;
 }
 
-function formatRelTime(ms: number): string {
-  const totalSec = Math.floor(Math.max(0, ms) / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  }
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function formatAbsTime(baseTimestampMs: number, relMs: number): string {
-  const absolute = new Date(baseTimestampMs + Math.max(0, relMs));
-  const hh = String(absolute.getHours()).padStart(2, "0");
-  const mm = String(absolute.getMinutes()).padStart(2, "0");
-  const ss = String(absolute.getSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
-}
-
 export function ActivityInsights({
   records,
   theme,
   distanceUnit,
+  xAxisMode = "time",
   heartRateZoneBoundsBpm,
   zoomRange,
   onZoomChange,
   lapTimestampsUtc = [],
   smoothGraphs = true,
+  timerMetadata,
 }: Props) {
-    const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
+  const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
   const isDark = theme === "dark";
   const { t: tr } = useTranslation();
   const axisColor = isDark ? "#8899b8" : "#64748b";
@@ -72,8 +73,6 @@ export function ActivityInsights({
     borderColor: tooltipBorder,
     textStyle: { color: tooltipText, fontSize: 12 },
   };
-  const formatTooltipHeader = (relMs: number) =>
-    `<div style="display:flex;align-items:center;gap:6px;"><strong>${formatRelTime(relMs)}</strong><span style="display:inline-flex;align-items:center;border-radius:999px;padding:1px 6px;font-size:11px;background:rgba(148,163,184,0.22);">${formatAbsTime(t0, relMs)}</span></div>`;
 
   if (!records.length) {
     return (
@@ -85,20 +84,29 @@ export function ActivityInsights({
   }
 
   const t0 = records[0]?.timestamp_ms ?? 0;
-  const totalDurationMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
-  const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(records.length, totalDurationMs, zoomRange) : 1;
-  const timeline = records.map((r, i) => {
-    const prev = i > 0 ? records[i - 1] : undefined;
-    const dt = prev ? (r.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
+  const telemetryPoints = buildTelemetryPoints(records, t0, xAxisMode, distanceUnit, timerMetadata);
+  const totalDurationMs = Math.max(0, telemetryPoints[telemetryPoints.length - 1]?.relMs ?? ((records[records.length - 1]?.timestamp_ms ?? t0) - t0));
+  const smoothWindow = smoothGraphs ? getDynamicSmoothingWindow(telemetryPoints.length || records.length, totalDurationMs, zoomRange) : 1;
+  const xAxisBounds = buildTelemetryXAxisBounds(telemetryPoints);
+  const formatTooltipHeader = (relMs: number, distanceMeters: number | null, mode: TelemetryXAxisMode = xAxisMode, timestampMs?: number) =>
+    formatTelemetryTooltipHeader(mode, t0, relMs, distanceMeters, distanceUnit, timestampMs);
+
+  const timeline = telemetryPoints.map((point, i) => {
+    const r = point.record;
+    const prevPoint = i > 0 ? telemetryPoints[i - 1] : undefined;
+    const prevRecord = prevPoint?.record;
+    const dt = prevPoint ? (point.relMs - prevPoint.relMs) / 1000 : 0;
     const derivedSpeed =
-      !r.speed_m_s && prev && typeof r.distance_m === "number" && typeof prev.distance_m === "number" && dt > 0
-        ? Math.max(0, (r.distance_m - prev.distance_m) / dt)
+      !r.speed_m_s && prevRecord && typeof r.distance_m === "number" && typeof prevRecord.distance_m === "number" && dt > 0
+        ? Math.max(0, (r.distance_m - prevRecord.distance_m) / dt)
         : undefined;
     const speedMs = r.speed_m_s ?? derivedSpeed;
     const speedInUnit = typeof speedMs === "number" ? convertSpeedMps(speedMs, distanceUnit) : null;
     const paceMinPerUnit = speedInUnit && speedInUnit > 0 ? 60 / speedInUnit : null;
     return {
-      relMs: r.timestamp_ms - t0,
+      x: point.x,
+      relMs: point.relMs,
+      distanceMeters: point.distanceMeters,
       speedInUnit,
       altitudeInUnit: typeof r.altitude_m === "number" ? convertElevationMeters(r.altitude_m, distanceUnit) : null,
       paceMinPerUnit,
@@ -106,47 +114,46 @@ export function ActivityInsights({
       power: r.power ?? null,
       cadence: r.cadence ?? null,
       temperatureC: r.temperature_c ?? null,
-      timestampMs: r.timestamp_ms,
+      timestampMs: point.timestampMs,
     };
   });
 
-  const speedLineData = timeline.map((d) => [d.relMs, d.speedInUnit]);
-  const elevationLineData = timeline.map((d) => [d.relMs, d.altitudeInUnit]);
-  const cadenceLineData = timeline.map((d) => [d.relMs, d.cadence]);
-  const powerLineData = timeline.map((d) => [d.relMs, d.power]);
+  const speedLineData = timeline.map((d) => [d.x, d.speedInUnit, d.relMs, d.timestampMs, d.distanceMeters] as [number | null, number | null, number, number, number | null]).filter(isSeriesRow);
+  const elevationLineData = timeline.map((d) => [d.x, d.altitudeInUnit, d.relMs, d.timestampMs, d.distanceMeters] as [number | null, number | null, number, number, number | null]).filter(isSeriesRow);
+  const cadenceLineData = timeline.map((d) => [d.x, d.cadence, d.relMs, d.timestampMs, d.distanceMeters] as [number | null, number | null, number, number, number | null]).filter(isSeriesRow);
+  const powerLineData = timeline.map((d) => [d.x, d.power, d.relMs, d.timestampMs, d.distanceMeters] as [number | null, number | null, number, number, number | null]).filter(isSeriesRow);
 
   const speedLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(speedLineData, 1, smoothWindow) : speedLineData;
   const elevationLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(elevationLineData, 1, smoothWindow) : elevationLineData;
   const cadenceLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(cadenceLineData, 1, smoothWindow) : cadenceLineData;
   const powerLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(powerLineData, 1, smoothWindow) : powerLineData;
 
-  const hasPowerData = records.some((r) => typeof r.power === "number" && r.power > 0);
-  const hasHeartRateData = records.some((r) => typeof r.heart_rate === "number" && r.heart_rate > 0);
+  const hasPowerData = timeline.some((d) => typeof d.power === "number" && d.power > 0);
+  const hasHeartRateData = timeline.some((d) => typeof d.heartRate === "number" && d.heartRate > 0);
 
-  const lapMarkers = lapTimestampsUtc
-    .slice(1)
-    .map((ts, idx) => {
-      const parsed = Date.parse(ts);
-      if (!Number.isFinite(parsed)) return null;
-      const relMs = parsed - t0;
-      if (relMs < 0) return null;
-      return { xAxis: relMs, name: `Lap ${idx + 1}` };
-    })
-    .filter((m): m is { xAxis: number; name: string } => m !== null);
+  const lapMarkers = buildLapMarkers(records, lapTimestampsUtc, t0, xAxisMode, distanceUnit, timerMetadata);
 
-  const hrValues = records
-    .map((r) => r.heart_rate)
+  const hrValues = timeline
+    .map((d) => d.heartRate)
     .filter((n): n is number => typeof n === "number" && n > 0);
   const zoneMinutes = hrZones.map(() => 0);
   if (hrValues.length > 0) {
-    for (let i = 0; i < records.length - 1; i += 1) {
-      const hr = records[i].heart_rate;
+    for (let i = 0; i < timeline.length - 1; i += 1) {
+      const hr = timeline[i].heartRate;
       if (typeof hr !== "number" || hr <= 0) continue;
-      const dtMin = Math.max(0, (records[i + 1].timestamp_ms - records[i].timestamp_ms) / 60000);
+      const dtMin = Math.max(0, (timeline[i + 1].relMs - timeline[i].relMs) / 60000);
       const zoneIndex = resolveHeartRateZoneIndex(hr, hrZones);
       zoneMinutes[zoneIndex] += dtMin;
     }
   }
+
+  const sharedXAxis = {
+    type: "value",
+    ...xAxisBounds,
+    axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatTelemetryXAxisTick(val, xAxisMode, distanceUnit) },
+    axisLine: { lineStyle: { color: gridLine } },
+    splitLine: { show: false },
+  };
 
   const timelineOption = {
     tooltip: {
@@ -154,8 +161,9 @@ export function ActivityInsights({
       ...tooltipStyle,
       formatter: (params: any[]) => {
         const p = params?.[0];
-        const rel = Number(p?.value?.[0] ?? 0);
-        let html = formatTooltipHeader(rel);
+        const rel = Number(p?.value?.[2] ?? 0);
+        const distanceMeters = (p?.value?.[4] ?? null) as number | null;
+        let html = formatTooltipHeader(rel, distanceMeters, xAxisMode, Number(p?.value?.[3] ?? 0));
         for (const row of params) {
           if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
             html += `<div>${row.marker} ${row.seriesName}: <strong>${Number(row.value[1]).toFixed(2)}</strong></div>`;
@@ -166,12 +174,7 @@ export function ActivityInsights({
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
     grid: { left: 50, right: 16, top: 42, bottom: 46 },
-    xAxis: {
-      type: "value",
-      axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
-      axisLine: { lineStyle: { color: gridLine } },
-      splitLine: { show: false },
-    },
+    xAxis: sharedXAxis,
     yAxis: {
       type: "value", name: speedLabel(distanceUnit),
       nameTextStyle: { color: axisColor, fontSize: 11 },
@@ -211,19 +214,15 @@ export function ActivityInsights({
       ...tooltipStyle,
       formatter: (params: any[]) => {
         const p = params?.[0];
-        const rel = Number(p?.value?.[0] ?? 0);
+        const rel = Number(p?.value?.[2] ?? 0);
+        const distanceMeters = (p?.value?.[4] ?? null) as number | null;
         const val = p?.value?.[1];
-        return `${formatTooltipHeader(rel)}<div>${p?.marker ?? ""} Elevation: <strong>${val == null ? "--" : Number(val).toFixed(2)} ${elevationLabel(distanceUnit)}</strong></div>`;
+        return `${formatTooltipHeader(rel, distanceMeters, xAxisMode, Number(p?.value?.[3] ?? 0))}<div>${p?.marker ?? ""} ${tr("insights.elevation")}: <strong>${val == null ? "--" : Number(val).toFixed(2)} ${elevationLabel(distanceUnit)}</strong></div>`;
       }
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
     grid: { left: 50, right: 16, top: 42, bottom: 46 },
-    xAxis: {
-      type: "value",
-      axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
-      axisLine: { lineStyle: { color: gridLine } },
-      splitLine: { show: false },
-    },
+    xAxis: sharedXAxis,
     yAxis: {
       type: "value", name: elevationLabel(distanceUnit),
       nameTextStyle: { color: axisColor, fontSize: 11 },
@@ -289,11 +288,12 @@ export function ActivityInsights({
       ...tooltipStyle,
       formatter: (params: any[]) => {
         const p = params?.[0];
-        const rel = Number(p?.value?.[0] ?? 0);
-        let html = formatTooltipHeader(rel);
+        const rel = Number(p?.value?.[2] ?? 0);
+        const distanceMeters = (p?.value?.[4] ?? null) as number | null;
+        let html = formatTooltipHeader(rel, distanceMeters, xAxisMode, Number(p?.value?.[3] ?? 0));
         for (const row of params) {
           if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
-            const unit = row.seriesName === "Cadence" ? " rpm" : " W";
+            const unit = row.seriesName === tr("insights.cadence") ? " rpm" : " W";
             html += `<div>${row.marker} ${row.seriesName}: <strong>${Number(row.value[1]).toFixed(2)}${unit}</strong></div>`;
           }
         }
@@ -302,12 +302,7 @@ export function ActivityInsights({
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
     grid: { left: 44, right: hasPowerData ? 44 : 16, top: 44, bottom: 44 },
-    xAxis: {
-      type: "value",
-      axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
-      axisLine: { lineStyle: { color: gridLine } },
-      splitLine: { show: false },
-    },
+    xAxis: sharedXAxis,
     yAxis: [
       {
         type: "value", name: "rpm",
@@ -354,9 +349,9 @@ export function ActivityInsights({
     ],
   };
 
-  const hrPowerScatter = records
-    .filter((r) => typeof r.heart_rate === "number" && typeof r.power === "number")
-    .map((r) => [r.heart_rate as number, r.power as number]);
+  const hrPowerScatter = timeline
+    .filter((d) => typeof d.heartRate === "number" && typeof d.power === "number")
+    .map((d) => [d.heartRate as number, d.power as number]);
 
   const scatterOption = {
     tooltip: { trigger: "item", ...tooltipStyle },
@@ -461,7 +456,7 @@ export function ActivityInsights({
     ],
   };
 
-  const totalRelMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
+  const totalRelMs = Math.max(0, timeline[timeline.length - 1]?.relMs ?? totalDurationMs);
   const heatBins = Math.max(1, Math.ceil(totalRelMs / 60000));
   const heatMetrics = [
     {
@@ -491,12 +486,13 @@ export function ActivityInsights({
   ] as const;
 
   const heatRowBounds = heatMetrics.map(() => ({ min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }));
-  const rawHeatCells: Array<Array<{ x: number; raw: number | null }>> = heatMetrics.map(() => []);
+  const rawHeatCells: Array<Array<{ x: number; raw: number | null; timestampMs?: number }>> = heatMetrics.map(() => []);
 
   for (let x = 0; x < heatBins; x += 1) {
     const startMs = x * 60000;
     const endMs = startMs + 60000;
     const slice = timeline.filter((d) => d.relMs >= startMs && d.relMs < endMs);
+    const timestampMs = slice[0]?.timestampMs;
     for (let row = 0; row < heatMetrics.length; row += 1) {
       const metricValue = safeAvg(slice.map((r) => heatMetrics[row].getter(r)));
       const raw = typeof metricValue === "number" && Number.isFinite(metricValue) ? Number(metricValue.toFixed(2)) : null;
@@ -504,7 +500,7 @@ export function ActivityInsights({
         heatRowBounds[row].min = Math.min(heatRowBounds[row].min, raw);
         heatRowBounds[row].max = Math.max(heatRowBounds[row].max, raw);
       }
-      rawHeatCells[row].push({ x, raw });
+      rawHeatCells[row].push({ x, raw, timestampMs });
     }
   }
 
@@ -520,6 +516,7 @@ export function ActivityInsights({
         return {
           value: [x, 0, Number(normalized.toFixed(4))],
           raw,
+          timestampMs: rowCells[x]?.timestampMs,
           label: heatMetrics[row].label,
           unit: heatMetrics[row].unit,
         };
@@ -540,8 +537,9 @@ export function ActivityInsights({
         const unit = String(p?.data?.unit ?? "");
         const startMs = minuteIdx * 60000;
         const endMs = (minuteIdx + 1) * 60000;
+        const timestampMs = (p?.data?.timestampMs ?? undefined) as number | undefined;
         const valueText = value === null ? "--" : `${value.toFixed(2)} ${unit}`;
-        return `<div><strong>${label}</strong></div>${formatTooltipHeader(startMs)}<div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${valueText}</strong></div>`;
+        return `<div><strong>${label}</strong></div>${formatTooltipHeader(startMs, null, "time", timestampMs)}<div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${valueText}</strong></div>`;
       },
     },
     grid: rowTop.map((top) => ({ left: 58, right: 14, top, height: rowHeight })),

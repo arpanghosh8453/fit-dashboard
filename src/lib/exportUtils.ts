@@ -35,6 +35,16 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_\-\.]/g, "_").replace(/_{2,}/g, "_");
 }
 
+function parseActivityMetadata(raw?: string): unknown {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ── CSV ─────────────────────────────────────────────────────────── */
 
 export function buildCsv(activity: Activity, records: RecordPoint[]): string {
@@ -110,6 +120,7 @@ export function buildJson(activity: Activity, records: RecordPoint[]): string {
         durationS: activity.duration_s,
         distanceM: activity.distance_m,
       },
+      metadata: parseActivityMetadata(activity.metadata_json),
       records,
     },
     null,

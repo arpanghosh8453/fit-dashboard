@@ -7,6 +7,23 @@ use sha2::{Digest, Sha256};
 use crate::models::{ParsedActivity, RecordPoint};
 
 const NON_ACTIVITY_FIT_MARKER: &str = "non-activity-fit:";
+const TIMER_INTERVAL_TOLERANCE_S: f64 = 5.0;
+
+#[derive(Clone, Debug, PartialEq)]
+struct TimerEvent {
+    timestamp_ms: i64,
+    event: String,
+    event_type: String,
+    timer_trigger: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StoppedInterval {
+    start_ms: i64,
+    end_ms: i64,
+    trigger: Option<String>,
+    resume_trigger: Option<String>,
+}
 
 pub fn is_non_activity_fit_error(err: &anyhow::Error) -> bool {
     err.chain()
@@ -242,6 +259,209 @@ fn total_distance_m(points: &[RecordPoint]) -> f64 {
         .unwrap_or(0.0)
 }
 
+fn valid_duration_s(value: Option<f64>) -> Option<f64> {
+    value.filter(|v| v.is_finite() && *v > 0.0)
+}
+
+fn add_valid_duration_s(total: &mut Option<f64>, value: Option<f64>) {
+    if let Some(duration) = valid_duration_s(value) {
+        *total = Some(total.unwrap_or(0.0) + duration);
+    }
+}
+
+fn select_fit_duration_s(
+    session_total_timer_time_sum_s: Option<f64>,
+    activity_total_timer_time_s: Option<f64>,
+    lap_total_timer_time_sum_s: Option<f64>,
+    session_total_elapsed_time_sum_s: Option<f64>,
+    record_span_duration_s: f64,
+) -> (f64, &'static str) {
+    if let Some(duration) = valid_duration_s(session_total_timer_time_sum_s) {
+        return (duration, "sessions.total_timer_time_sum");
+    }
+    if let Some(duration) = valid_duration_s(activity_total_timer_time_s) {
+        return (duration, "activity.total_timer_time");
+    }
+    if let Some(duration) = valid_duration_s(lap_total_timer_time_sum_s) {
+        return (duration, "laps.total_timer_time_sum");
+    }
+    if let Some(duration) = valid_duration_s(session_total_elapsed_time_sum_s) {
+        return (duration, "sessions.total_elapsed_time_sum");
+    }
+
+    (record_span_duration_s.max(0.0), "record_timestamp_span")
+}
+
+fn select_fit_time_range_ms(
+    record_start_ts: i64,
+    record_end_ts: i64,
+    session_start_ts: Option<i64>,
+    session_end_ts: Option<i64>,
+    duration_s: f64,
+) -> (i64, i64) {
+    let start_ts = session_start_ts.unwrap_or(record_start_ts);
+    let mut end_ts = session_end_ts.unwrap_or(record_end_ts).max(start_ts);
+    let current_span_ms = end_ts - start_ts;
+    let duration_ms = (duration_s * 1000.0).round();
+
+    if duration_ms.is_finite() && duration_ms > current_span_ms as f64 {
+        if let Some(duration_end_ts) = start_ts.checked_add(duration_ms as i64) {
+            end_ts = duration_end_ts;
+        }
+    }
+
+    (start_ts, end_ts)
+}
+
+fn normalize_fit_token(raw: &str) -> Option<String> {
+    let value = raw.trim().to_lowercase().replace([' ', '-'], "_");
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn fit_event_name(value: &Value) -> Option<String> {
+    let raw = normalize_fit_token(&value_string(value))?;
+    Some(match raw.as_str() {
+        "0" => "timer".to_string(),
+        _ => raw,
+    })
+}
+
+fn fit_event_type_name(value: &Value) -> Option<String> {
+    let raw = normalize_fit_token(&value_string(value))?;
+    Some(match raw.as_str() {
+        "0" => "start".to_string(),
+        "1" => "stop".to_string(),
+        "4" => "stop_all".to_string(),
+        "8" => "stop_disable".to_string(),
+        "9" => "stop_disable_all".to_string(),
+        _ => raw,
+    })
+}
+
+fn fit_timer_trigger_name(value: &Value) -> Option<String> {
+    let raw = normalize_fit_token(&value_string(value))?;
+    Some(match raw.as_str() {
+        "0" => "manual".to_string(),
+        "1" => "auto".to_string(),
+        "2" => "fitness_equipment".to_string(),
+        _ => raw,
+    })
+}
+
+fn is_timer_start_event(event_type: &str) -> bool {
+    matches!(event_type, "start" | "start_all")
+}
+
+fn is_timer_stop_event(event_type: &str) -> bool {
+    matches!(event_type, "stop" | "stop_all" | "stop_disable" | "stop_disable_all")
+}
+
+fn timestamp_ms_to_rfc3339(ts: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(ts).map(|dt| dt.to_rfc3339())
+}
+
+fn build_stopped_intervals(
+    timer_events: &[TimerEvent],
+    start_bound_ms: i64,
+    end_bound_ms: i64,
+) -> Vec<StoppedInterval> {
+    let mut events = timer_events.to_vec();
+    events.sort_by_key(|event| event.timestamp_ms);
+
+    let mut stopped_start: Option<TimerEvent> = None;
+    let mut intervals = Vec::new();
+
+    for event in events {
+        if event.event != "timer" {
+            continue;
+        }
+
+        if is_timer_stop_event(&event.event_type) {
+            if stopped_start.is_none() {
+                stopped_start = Some(event);
+            }
+            continue;
+        }
+
+        if is_timer_start_event(&event.event_type) {
+            let Some(stop_event) = stopped_start.take() else {
+                continue;
+            };
+
+            let start_ms = stop_event.timestamp_ms.max(start_bound_ms);
+            let end_ms = event.timestamp_ms.min(end_bound_ms);
+            if end_ms > start_ms {
+                intervals.push(StoppedInterval {
+                    start_ms,
+                    end_ms,
+                    trigger: stop_event.timer_trigger,
+                    resume_trigger: event.timer_trigger,
+                });
+            }
+        }
+    }
+
+    intervals
+}
+
+fn build_timer_metadata(
+    timer_events: &[TimerEvent],
+    record_start_ts: i64,
+    record_end_ts: i64,
+    elapsed_time_s: Option<f64>,
+    timer_time_s: f64,
+) -> serde_json::Value {
+    let elapsed_time_s = valid_duration_s(elapsed_time_s)
+        .unwrap_or_else(|| ((record_end_ts - record_start_ts).max(0) as f64) / 1000.0);
+    let intervals = build_stopped_intervals(timer_events, record_start_ts, record_end_ts);
+    let stopped_time_s: f64 = intervals
+        .iter()
+        .map(|interval| ((interval.end_ms - interval.start_ms).max(0) as f64) / 1000.0)
+        .sum();
+    let derived_timer_time_s = (elapsed_time_s - stopped_time_s).max(0.0);
+    let intervals_reliable = !intervals.is_empty()
+        && (derived_timer_time_s - timer_time_s).abs() <= TIMER_INTERVAL_TOLERANCE_S;
+
+    serde_json::json!({
+        "schema_version": 1,
+        "source": "fit_event_messages",
+        "active_time_supported": intervals_reliable,
+        "intervals_reliable": intervals_reliable,
+        "elapsed_time_s": elapsed_time_s,
+        "timer_time_s": timer_time_s,
+        "stopped_time_s": stopped_time_s,
+        "events": timer_events.iter().map(|event| serde_json::json!({
+            "timestamp": timestamp_ms_to_rfc3339(event.timestamp_ms),
+            "event": event.event,
+            "event_type": event.event_type,
+            "timer_trigger": event.timer_trigger
+        })).collect::<Vec<_>>(),
+        "stopped_intervals": intervals.iter().map(|interval| serde_json::json!({
+            "start_ts_utc": timestamp_ms_to_rfc3339(interval.start_ms),
+            "end_ts_utc": timestamp_ms_to_rfc3339(interval.end_ms),
+            "duration_s": ((interval.end_ms - interval.start_ms).max(0) as f64) / 1000.0,
+            "trigger": interval.trigger,
+            "resume_trigger": interval.resume_trigger
+        })).collect::<Vec<_>>()
+    })
+}
+
+fn update_min_ts(slot: &mut Option<i64>, value: Option<i64>) {
+    if let Some(ts) = value {
+        *slot = Some(slot.map_or(ts, |current| current.min(ts)));
+    }
+}
+
+fn update_max_ts(slot: &mut Option<i64>, value: Option<i64>) {
+    if let Some(ts) = value {
+        *slot = Some(slot.map_or(ts, |current| current.max(ts)));
+    }
+}
+
 fn first_valid_coordinates(points: &[RecordPoint]) -> (Option<f64>, Option<f64>) {
     if let Some(point) = points
         .iter()
@@ -305,10 +525,18 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut session_avg_heart_rate: Option<i64> = None;
     let mut session_max_cadence: Option<i64> = None;
     let mut session_avg_cadence: Option<i64> = None;
-    let mut session_total_elapsed_time_s: Option<f64> = None;
+    let mut session_count: i64 = 0;
+    let mut session_start_ts: Option<i64> = None;
+    let mut session_end_ts: Option<i64> = None;
+    let mut session_total_elapsed_time_sum_s: Option<f64> = None;
+    let mut session_total_timer_time_sum_s: Option<f64> = None;
     let mut session_total_distance_m: Option<f64> = None;
     let mut session_total_calories: Option<i64> = None;
+    let mut session_normalized_power: Option<i64> = None;
+    let mut activity_total_timer_time_s: Option<f64> = None;
+    let mut lap_total_timer_time_sum_s: Option<f64> = None;
     let mut lap_ranges: Vec<serde_json::Value> = Vec::new();
+    let mut timer_events: Vec<TimerEvent> = Vec::new();
     let mut heart_rate_zone_bounds_bpm: Vec<i64> = Vec::new();
 
     let mut min_ts: Option<i64> = None;
@@ -374,9 +602,16 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                 });
             }
         } else if rec.kind() == MesgNum::Session {
+            session_count += 1;
             for field in rec.fields() {
                 match field.name() {
                     "sport" => sport = value_string(field.value()).to_lowercase(),
+                    "start_time" => {
+                        update_min_ts(&mut session_start_ts, value_timestamp_ms(field.value()))
+                    }
+                    "timestamp" => {
+                        update_max_ts(&mut session_end_ts, value_timestamp_ms(field.value()))
+                    }
                     "beginning_body_battery" | "start_body_battery" => {
                         session_beginning_body_battery = value_i64(field.value())
                     }
@@ -387,9 +622,21 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "avg_heart_rate" => session_avg_heart_rate = value_i64(field.value()),
                     "max_cadence" => session_max_cadence = value_i64(field.value()),
                     "avg_cadence" => session_avg_cadence = value_i64(field.value()),
-                    "total_elapsed_time" => session_total_elapsed_time_s = value_f64(field.value()),
+                    "total_elapsed_time" => {
+                        add_valid_duration_s(
+                            &mut session_total_elapsed_time_sum_s,
+                            value_f64(field.value()),
+                        )
+                    }
+                    "total_timer_time" => {
+                        add_valid_duration_s(
+                            &mut session_total_timer_time_sum_s,
+                            value_f64(field.value()),
+                        )
+                    }
                     "total_distance" => session_total_distance_m = value_f64(field.value()),
                     "total_calories" => session_total_calories = value_i64(field.value()),
+                    "normalized_power" => session_normalized_power = value_i64(field.value()),
                     _ => {}
                 }
             }
@@ -493,6 +740,38 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     }
                 }
             }
+        } else if rec.kind() == MesgNum::Activity {
+            for field in rec.fields() {
+                if field.name() == "total_timer_time" {
+                    activity_total_timer_time_s = value_f64(field.value());
+                }
+            }
+        } else if rec.kind() == MesgNum::Event {
+            let mut timestamp_ms: Option<i64> = None;
+            let mut event: Option<String> = None;
+            let mut event_type: Option<String> = None;
+            let mut timer_trigger: Option<String> = None;
+
+            for field in rec.fields() {
+                match field.name() {
+                    "timestamp" => timestamp_ms = value_timestamp_ms(field.value()),
+                    "event" => event = fit_event_name(field.value()),
+                    "event_type" => event_type = fit_event_type_name(field.value()),
+                    "timer_trigger" => timer_trigger = fit_timer_trigger_name(field.value()),
+                    _ => {}
+                }
+            }
+
+            if event.as_deref() == Some("timer") {
+                if let (Some(timestamp_ms), Some(event_type)) = (timestamp_ms, event_type) {
+                    timer_events.push(TimerEvent {
+                        timestamp_ms,
+                        event: "timer".to_string(),
+                        event_type,
+                        timer_trigger,
+                    });
+                }
+            }
         } else if rec.kind() == MesgNum::Lap {
             let mut lap_start_ms: Option<i64> = None;
             let mut lap_end_ms: Option<i64> = None;
@@ -509,6 +788,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             let mut lap_max_cadence: Option<i64> = None;
             let mut lap_total_calories: Option<i64> = None;
             let mut lap_best_speed_m_s: Option<f64> = None;
+            let mut lap_normalized_power: Option<i64> = None;
             for field in rec.fields() {
                 match field.name() {
                     "start_time" => lap_start_ms = value_timestamp_ms(field.value()),
@@ -541,8 +821,13 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "avg_cadence" => lap_avg_cadence = value_i64(field.value()),
                     "max_cadence" => lap_max_cadence = value_i64(field.value()),
                     "total_calories" => lap_total_calories = value_i64(field.value()),
+                    "normalized_power" => lap_normalized_power = value_i64(field.value()),
                     _ => {}
                 }
+            }
+
+            if let Some(duration) = valid_duration_s(lap_total_timer_time_s) {
+                lap_total_timer_time_sum_s = Some(lap_total_timer_time_sum_s.unwrap_or(0.0) + duration);
             }
 
             lap_ranges.push(serde_json::json!({
@@ -564,7 +849,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                 "avg_cadence": lap_avg_cadence,
                 "max_cadence": lap_max_cadence,
                 "total_calories": lap_total_calories,
-                "best_speed_m_s": lap_best_speed_m_s
+                "best_speed_m_s": lap_best_speed_m_s,
+                "normalized_power": lap_normalized_power
             }));
         }
 
@@ -607,15 +893,36 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         }
     }
 
-    let start_ts = min_ts.ok_or_else(|| anyhow!("FIT file had no timestamped records"))?;
-    let end_ts = max_ts.unwrap_or(start_ts);
+    let record_start_ts = min_ts.ok_or_else(|| anyhow!("FIT file had no timestamped records"))?;
+    let record_end_ts = max_ts.unwrap_or(record_start_ts);
 
     derive_distance_if_missing(&mut points);
     derive_speed_if_missing(&mut points);
 
-    let duration_s = ((end_ts - start_ts).max(0) as f64) / 1000.0;
+    let record_span_duration_s = ((record_end_ts - record_start_ts).max(0) as f64) / 1000.0;
+    let (duration_s, duration_source) = select_fit_duration_s(
+        session_total_timer_time_sum_s,
+        activity_total_timer_time_s,
+        lap_total_timer_time_sum_s,
+        session_total_elapsed_time_sum_s,
+        record_span_duration_s,
+    );
+    let (start_ts, end_ts) = select_fit_time_range_ms(
+        record_start_ts,
+        record_end_ts,
+        session_start_ts,
+        session_end_ts,
+        duration_s,
+    );
     let distance_m = total_distance_m(&points);
     let (start_latitude, start_longitude) = first_valid_coordinates(&points);
+    let timer_metadata = build_timer_metadata(
+        &timer_events,
+        record_start_ts,
+        record_end_ts,
+        session_total_elapsed_time_sum_s,
+        duration_s,
+    );
 
     let file_id_combined_name = combine_device_name(
         file_id_product_name.clone(),
@@ -639,6 +946,12 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         "record_count": points.len(),
         "device": device,
         "sport": sport,
+        "duration_source": duration_source,
+        "record_span_duration_s": record_span_duration_s,
+        "record_start_ts_utc": chrono::DateTime::from_timestamp_millis(record_start_ts)
+            .map(|dt| dt.to_rfc3339()),
+        "record_end_ts_utc": chrono::DateTime::from_timestamp_millis(record_end_ts)
+            .map(|dt| dt.to_rfc3339()),
         "source_format": "fit",
         "file_id": {
             "product_name": file_id_combined_name,
@@ -653,17 +966,30 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         "activity_metrics": {
             "vo2_max": vo2_max
         },
+        "activity": {
+            "total_timer_time_s": activity_total_timer_time_s
+        },
+        "timer": timer_metadata,
         "heart_rate_zone_bounds_bpm": heart_rate_zone_bounds_bpm,
         "session": {
+            "count": session_count,
+            "start_ts_utc": session_start_ts
+                .and_then(chrono::DateTime::from_timestamp_millis)
+                .map(|dt| dt.to_rfc3339()),
+            "end_ts_utc": session_end_ts
+                .and_then(chrono::DateTime::from_timestamp_millis)
+                .map(|dt| dt.to_rfc3339()),
             "beginning_body_battery": session_beginning_body_battery,
             "ending_body_battery": session_ending_body_battery,
             "max_heart_rate": session_max_heart_rate,
             "avg_heart_rate": session_avg_heart_rate,
             "max_cadence": session_max_cadence,
             "avg_cadence": session_avg_cadence,
-            "total_elapsed_time_s": session_total_elapsed_time_s,
+            "total_elapsed_time_s": session_total_elapsed_time_sum_s,
+            "total_timer_time_s": session_total_timer_time_sum_s,
             "total_distance_m": session_total_distance_m,
-            "total_calories": session_total_calories
+            "total_calories": session_total_calories,
+            "normalized_power": session_normalized_power
         },
         "laps": lap_ranges
     })
@@ -978,4 +1304,193 @@ fn parse_gpx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         records: points,
         metadata_json,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fit_duration_accumulates_valid_session_timer_values() {
+        let mut total = None;
+        add_valid_duration_s(&mut total, Some(1_000.0));
+        add_valid_duration_s(&mut total, Some(0.0));
+        add_valid_duration_s(&mut total, Some(1_651.675));
+        add_valid_duration_s(&mut total, Some(f64::NAN));
+
+        assert!((total.unwrap() - 2_651.675).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn fit_duration_prefers_session_timer_time_sum() {
+        let (duration, source) = select_fit_duration_s(
+            Some(2_651.675),
+            Some(2_700.0),
+            Some(2_700.0),
+            Some(2_705.309),
+            2_705.0,
+        );
+
+        assert_eq!(duration, 2_651.675);
+        assert_eq!(source, "sessions.total_timer_time_sum");
+    }
+
+    #[test]
+    fn fit_duration_uses_activity_timer_before_lap_sum() {
+        let (duration, source) = select_fit_duration_s(
+            None,
+            Some(606_452.96),
+            Some(3_217.111),
+            Some(606_452.96),
+            3_217.0,
+        );
+
+        assert_eq!(duration, 606_452.96);
+        assert_eq!(source, "activity.total_timer_time");
+    }
+
+    #[test]
+    fn fit_duration_uses_lap_timer_sum_before_elapsed_time() {
+        let (duration, source) = select_fit_duration_s(
+            None,
+            None,
+            Some(2_651.675),
+            Some(2_705.309),
+            2_705.0,
+        );
+
+        assert_eq!(duration, 2_651.675);
+        assert_eq!(source, "laps.total_timer_time_sum");
+    }
+
+    #[test]
+    fn fit_duration_falls_back_to_elapsed_then_record_span() {
+        let (elapsed_duration, elapsed_source) = select_fit_duration_s(
+            None,
+            None,
+            None,
+            Some(2_705.309),
+            2_705.0,
+        );
+        assert_eq!(elapsed_duration, 2_705.309);
+        assert_eq!(elapsed_source, "sessions.total_elapsed_time_sum");
+
+        let (record_duration, record_source) =
+            select_fit_duration_s(None, None, None, None, 2_705.0);
+        assert_eq!(record_duration, 2_705.0);
+        assert_eq!(record_source, "record_timestamp_span");
+    }
+
+    #[test]
+    fn fit_duration_ignores_zero_or_invalid_timer_values() {
+        let (duration, source) = select_fit_duration_s(
+            Some(0.0),
+            Some(f64::NAN),
+            Some(-1.0),
+            Some(2_705.309),
+            2_705.0,
+        );
+
+        assert_eq!(duration, 2_705.309);
+        assert_eq!(source, "sessions.total_elapsed_time_sum");
+    }
+
+    fn timer_event(timestamp_ms: i64, event_type: &str, trigger: Option<&str>) -> TimerEvent {
+        TimerEvent {
+            timestamp_ms,
+            event: "timer".to_string(),
+            event_type: event_type.to_string(),
+            timer_trigger: trigger.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn fit_timer_intervals_pair_stop_with_next_start() {
+        let events = vec![
+            timer_event(0, "start", Some("manual")),
+            timer_event(10_000, "stop_all", Some("auto")),
+            timer_event(20_000, "start", Some("auto")),
+            timer_event(30_000, "stop_all", Some("manual")),
+        ];
+
+        let intervals = build_stopped_intervals(&events, 0, 40_000);
+
+        assert_eq!(intervals.len(), 1);
+        assert_eq!(intervals[0].start_ms, 10_000);
+        assert_eq!(intervals[0].end_ms, 20_000);
+        assert_eq!(intervals[0].trigger.as_deref(), Some("auto"));
+        assert_eq!(intervals[0].resume_trigger.as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn fit_timer_intervals_clamp_to_record_bounds() {
+        let events = vec![
+            timer_event(5_000, "stop", Some("manual")),
+            timer_event(20_000, "start", Some("manual")),
+        ];
+
+        let intervals = build_stopped_intervals(&events, 10_000, 15_000);
+
+        assert_eq!(intervals.len(), 1);
+        assert_eq!(intervals[0].start_ms, 10_000);
+        assert_eq!(intervals[0].end_ms, 15_000);
+    }
+
+    #[test]
+    fn fit_timer_metadata_marks_reliable_when_active_time_matches_timer() {
+        let events = vec![
+            timer_event(10_000, "stop_all", Some("auto")),
+            timer_event(20_000, "start", Some("auto")),
+        ];
+
+        let metadata = build_timer_metadata(&events, 0, 100_000, Some(100.0), 90.0);
+
+        assert_eq!(metadata["active_time_supported"].as_bool(), Some(true));
+        assert_eq!(metadata["intervals_reliable"].as_bool(), Some(true));
+        assert_eq!(metadata["stopped_time_s"].as_f64(), Some(10.0));
+    }
+
+    #[test]
+    fn fit_timer_metadata_falls_back_when_intervals_do_not_match_timer() {
+        let events = vec![
+            timer_event(10_000, "stop_all", Some("auto")),
+            timer_event(20_000, "start", Some("auto")),
+        ];
+
+        let metadata = build_timer_metadata(&events, 0, 100_000, Some(100.0), 70.0);
+
+        assert_eq!(metadata["active_time_supported"].as_bool(), Some(false));
+        assert_eq!(metadata["intervals_reliable"].as_bool(), Some(false));
+    }
+
+    #[test]
+    fn fit_time_range_uses_session_bounds_when_available() {
+        let (start_ts, end_ts) = select_fit_time_range_ms(
+            10_000,
+            70_000,
+            Some(0),
+            Some(120_000),
+            60.0,
+        );
+
+        assert_eq!(start_ts, 0);
+        assert_eq!(end_ts, 120_000);
+    }
+
+    #[test]
+    fn fit_time_range_extends_sparse_record_range_to_duration() {
+        let (start_ts, end_ts) = select_fit_time_range_ms(0, 60_000, None, None, 120.0);
+
+        assert_eq!(start_ts, 0);
+        assert_eq!(end_ts, 120_000);
+    }
+
+    #[test]
+    fn fit_time_range_does_not_shorten_elapsed_record_range() {
+        let (start_ts, end_ts) =
+            select_fit_time_range_ms(0, 2_705_309, None, None, 2_651.675);
+
+        assert_eq!(start_ts, 0);
+        assert_eq!(end_ts, 2_705_309);
+    }
 }
