@@ -486,12 +486,13 @@ export function ActivityInsights({
   ] as const;
 
   const heatRowBounds = heatMetrics.map(() => ({ min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }));
-  const rawHeatCells: Array<Array<{ x: number; raw: number | null }>> = heatMetrics.map(() => []);
+  const rawHeatCells: Array<Array<{ x: number; raw: number | null; timestampMs?: number }>> = heatMetrics.map(() => []);
 
   for (let x = 0; x < heatBins; x += 1) {
     const startMs = x * 60000;
     const endMs = startMs + 60000;
     const slice = timeline.filter((d) => d.relMs >= startMs && d.relMs < endMs);
+    const timestampMs = slice[0]?.timestampMs;
     for (let row = 0; row < heatMetrics.length; row += 1) {
       const metricValue = safeAvg(slice.map((r) => heatMetrics[row].getter(r)));
       const raw = typeof metricValue === "number" && Number.isFinite(metricValue) ? Number(metricValue.toFixed(2)) : null;
@@ -499,7 +500,7 @@ export function ActivityInsights({
         heatRowBounds[row].min = Math.min(heatRowBounds[row].min, raw);
         heatRowBounds[row].max = Math.max(heatRowBounds[row].max, raw);
       }
-      rawHeatCells[row].push({ x, raw });
+      rawHeatCells[row].push({ x, raw, timestampMs });
     }
   }
 
@@ -515,6 +516,7 @@ export function ActivityInsights({
         return {
           value: [x, 0, Number(normalized.toFixed(4))],
           raw,
+          timestampMs: rowCells[x]?.timestampMs,
           label: heatMetrics[row].label,
           unit: heatMetrics[row].unit,
         };
@@ -535,8 +537,9 @@ export function ActivityInsights({
         const unit = String(p?.data?.unit ?? "");
         const startMs = minuteIdx * 60000;
         const endMs = (minuteIdx + 1) * 60000;
+        const timestampMs = (p?.data?.timestampMs ?? undefined) as number | undefined;
         const valueText = value === null ? "--" : `${value.toFixed(2)} ${unit}`;
-        return `<div><strong>${label}</strong></div>${formatTooltipHeader(startMs, null, "time")}<div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${valueText}</strong></div>`;
+        return `<div><strong>${label}</strong></div>${formatTooltipHeader(startMs, null, "time", timestampMs)}<div>${formatRelTime(startMs)} - ${formatRelTime(endMs)}: <strong>${valueText}</strong></div>`;
       },
     },
     grid: rowTop.map((top) => ({ left: 58, right: 14, top, height: rowHeight })),
