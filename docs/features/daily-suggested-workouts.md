@@ -377,6 +377,75 @@ limited to Daily Suggested Workouts. It also shows why `WorkoutStep.intensity`
 should be the primary label source: lap `intensity` is null for every lap in
 this file.
 
+## Strength Training Planned Workout Boundary
+
+Source file:
+
+```text
+23264397268_ACTIVITY.fit
+```
+
+This file is also a Garmin planned workout, but it is a strength-training
+activity rather than an endurance interval activity:
+
+```json
+{
+  "wkt_name": "Total Body Circuit 3",
+  "num_valid_steps": 15,
+  "sport": "training",
+  "sub_sport": "strength_training"
+}
+```
+
+Observed message counts include:
+
+```text
+workout: 1
+workout_step: 15
+set: 43
+exercise_title: 7
+split: 42
+lap: 0
+```
+
+This is an important boundary case for the design. The planned-workout metadata
+still exists, but the recorded execution does not map through lap messages.
+There are no `Lap` messages. Instead, the file includes `Set` messages with
+`wkt_step_index`, plus `ExerciseTitle` messages with names such as `Squat`.
+
+That means strength/training planned workouts need a different UI model from the
+initial endurance interval table:
+
+- endurance planned workouts can use `Lap.wkt_step_index` to build an
+  `Intervals` table
+- strength planned workouts likely need `Set.wkt_step_index` and
+  `ExerciseTitle` support to build a `Sets` or `Exercises` table
+
+Strength/training planned workouts are not in the initial implementation scope.
+The first implementation should preserve the generic planned-workout metadata
+where practical, but the first UI should target endurance planned workouts with
+lap-based interval reconstruction. Strength/training support needs further
+investigation before implementation.
+
+## Initial Implementation Scope
+
+Initial scope:
+
+- Preserve `Workout` metadata in activity metadata JSON.
+- Preserve `WorkoutStep` metadata, including message index, duration, target,
+  intensity, repeat/control fields, and available names or descriptions.
+- Preserve lap `wkt_step_index`, `lap_trigger`, and lap `intensity` when
+  present.
+- Show an endurance-focused `Intervals` table for planned workouts that have
+  lap-to-step mappings.
+
+Out of initial scope:
+
+- Strength/training `Set` and `ExerciseTitle` UI.
+- Garmin-style derived group rows.
+- Execution score calculation or extraction.
+- Activity-name changes based on workout name.
+
 ## Activity Naming Considerations
 
 Garmin Connect appears to separate activity title, sport icon, and sport/subsport
@@ -467,6 +536,9 @@ Known sample values:
   including repeat/control fields, descriptions, intensities, and target ranges?
   The JavaScript parser used in investigation collapsed repeated `WorkoutStep`
   messages into a single `workout_step` object.
+- What is the minimal useful display model for strength/training planned
+  workouts that use `Set.wkt_step_index` and `ExerciseTitle` instead of
+  lap messages?
 - Are Garmin Connect execution scores present in standard FIT fields that
   require additional enum decoding, or are they only available through Garmin
   Connect outside the exported FIT?
