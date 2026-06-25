@@ -248,6 +248,7 @@
   "trend.duration": "时长",
   "compare.selectActivities": "从侧边栏选择最多4项活动进行对比。",
   "compare.loading": "加载对比数据...",
+  "compare.noAvailableCharts": "没有可比较的遥测数据。",
   "compare.resetZoom": "重置缩放",
   "compare.heartRate": "心率",
   "compare.speed": "速度",

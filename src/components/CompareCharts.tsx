@@ -3,6 +3,7 @@ import type { Activity, RecordPoint } from "../types";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
+import { combineRecordDataAvailability, getRecordDataAvailability } from "../lib/recordDataAvailability";
 import { convertElevationMeters, convertSpeedMps, elevationLabel, speedLabel, type DistanceUnit } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
 
@@ -93,6 +94,10 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
   const tooltipBorder = isDark ? "rgba(100, 140, 220, 0.2)" : "rgba(0, 0, 0, 0.08)";
   const tooltipText = isDark ? "#e2e8f4" : "#0f172a";
 
+  const combinedAvailability = combineRecordDataAvailability(
+    dataSets.map((ds) => getRecordDataAvailability(ds.records))
+  );
+
   const buildSeries = (key: keyof RecordPoint) => {
     return dataSets.map((ds) => {
       const t0 = ds.records[0]?.timestamp_ms ?? 0;
@@ -102,8 +107,15 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
         smooth: true,
         showSymbol: false,
         lineStyle: { width: 2 },
-        data: ds.records.map((r) => {
-          const raw = r[key] ?? null;
+        data: ds.records.map((r, i) => {
+          let raw = r[key] ?? null;
+          if (key === "speed_m_s" && (typeof raw !== "number" || raw <= 0)) {
+            const prev = i > 0 ? ds.records[i - 1] : undefined;
+            const dtS = prev ? (r.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
+            raw = prev && typeof r.distance_m === "number" && typeof prev.distance_m === "number" && dtS > 0
+              ? Math.max(0, (r.distance_m - prev.distance_m) / dtS)
+              : null;
+          }
           if (raw == null) return [r.timestamp_ms - t0, null];
           if (key === "speed_m_s") return [r.timestamp_ms - t0, convertSpeedMps(raw as number, distanceUnit)];
           if (key === "altitude_m") return [r.timestamp_ms - t0, convertElevationMeters(raw as number, distanceUnit)];
@@ -185,6 +197,21 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
     },
   };
 
+  const chartConfigs = [
+    { available: combinedAvailability.hasHeartRate, title: t("compare.heartRate"), unit: "bpm", key: "heart_rate" as keyof RecordPoint },
+    { available: combinedAvailability.hasSpeed, title: t("compare.speed"), unit: speedLabel(distanceUnit), key: "speed_m_s" as keyof RecordPoint },
+    { available: combinedAvailability.hasPower, title: t("compare.power"), unit: "W", key: "power" as keyof RecordPoint },
+    { available: combinedAvailability.hasElevation, title: t("compare.altitude"), unit: elevationLabel(distanceUnit), key: "altitude_m" as keyof RecordPoint },
+  ].filter((chart) => chart.available);
+
+  if (!chartConfigs.length) {
+    return (
+      <div className="empty-state">
+        <span>{t("compare.noAvailableCharts")}</span>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -192,10 +219,11 @@ export function CompareCharts({ compareIds, activities, theme, distanceUnit }: P
           {t("compare.resetZoom")}
         </button>
       </div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.heartRate"), "bpm", "heart_rate")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.speed"), speedLabel(distanceUnit), "speed_m_s")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.power"), "W", "power")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
-      <div className="panel"><ReactECharts option={createOption(t("compare.altitude"), elevationLabel(distanceUnit), "altitude_m")} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} /></div>
+      {chartConfigs.map((chart) => (
+        <div className="panel" key={String(chart.key)}>
+          <ReactECharts option={createOption(chart.title, chart.unit, chart.key)} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 320, width: "100%" }} />
+        </div>
+      ))}
     </div>
   );
 }
