@@ -248,6 +248,7 @@
   "trend.duration": "Duur",
   "compare.selectActivities": "Selecteer tot 4 activiteiten om te vergelijken.",
   "compare.loading": "Vergelijkingsgegevens laden...",
+  "compare.noAvailableCharts": "Geen vergelijkbare telemetriegegevens beschikbaar.",
   "compare.resetZoom": "Zoom resetten",
   "compare.heartRate": "Hartslag",
   "compare.speed": "Snelheid",

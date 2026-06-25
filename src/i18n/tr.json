@@ -248,6 +248,7 @@
   "trend.duration": "Süre",
   "compare.selectActivities": "Karşılaştırmak için en fazla 4 aktivite seçin.",
   "compare.loading": "Karşılaştırma verileri yükleniyor...",
+  "compare.noAvailableCharts": "Karşılaştırılabilir telemetri verisi yok.",
   "compare.resetZoom": "Yakınlaştırmayı sıfırla",
   "compare.heartRate": "Kalp Atış Hızı",
   "compare.speed": "Hız",

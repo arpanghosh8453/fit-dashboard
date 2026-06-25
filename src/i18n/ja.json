@@ -248,6 +248,7 @@
   "trend.duration": "時間",
   "compare.selectActivities": "比較するために最大4つのアクティビティを選択してください。",
   "compare.loading": "比較データを読み込み中...",
+  "compare.noAvailableCharts": "比較可能なテレメトリデータがありません。",
   "compare.resetZoom": "ズームをリセット",
   "compare.heartRate": "心拍数",
   "compare.speed": "速度",

@@ -3,6 +3,7 @@ import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { RecordPoint } from "../types";
 import type { MapStyle } from "../stores/settingsStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { getRecordDataAvailability } from "../lib/recordDataAvailability";
 import { convertElevationMeters, convertSpeedKmh, elevationLabel, speedLabel } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
 
@@ -88,7 +89,15 @@ function valueToColor(t: number): string {
 
 function getMetricValues(recs: RecordPoint[], mode: PathColorMode): number[] {
   switch (mode) {
-    case "speed": return recs.map((r) => (r.speed_m_s ?? 0) * 3.6);
+    case "speed": return recs.map((r, i) => {
+      if (typeof r.speed_m_s === "number" && r.speed_m_s > 0) return r.speed_m_s * 3.6;
+      const prev = i > 0 ? recs[i - 1] : undefined;
+      const dtS = prev ? (r.timestamp_ms - prev.timestamp_ms) / 1000 : 0;
+      if (prev && typeof r.distance_m === "number" && typeof prev.distance_m === "number" && dtS > 0) {
+        return Math.max(0, ((r.distance_m - prev.distance_m) / dtS) * 3.6);
+      }
+      return 0;
+    });
     case "heart_rate": return recs.map((r) => r.heart_rate ?? 0);
     case "cadence": return recs.map((r) => r.cadence ?? 0);
     case "altitude": return recs.map((r) => r.altitude_m ?? 0);
@@ -378,6 +387,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
   const distanceUnit = useSettingsStore((s) => s.distanceUnit);
   const selectedStyle = mapStyle === "default" ? theme : mapStyle;
   const { t } = useTranslation();
+  const availability = useMemo(() => getRecordDataAvailability(records), [records]);
 
   const pathColorLabels: Record<PathColorMode, string> = useMemo(() => ({
     solid: t("activityMap.colorSolid"),
@@ -389,6 +399,18 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
     temperature: t("activityMap.colorTemperature"),
     time: t("activityMap.colorTime"),
   }), [t]);
+
+  const pathColorOptions = useMemo(() => PATH_COLOR_VALUES.filter((mode) => {
+    switch (mode) {
+      case "speed": return availability.hasSpeed;
+      case "heart_rate": return availability.hasHeartRate;
+      case "cadence": return availability.hasCadence;
+      case "altitude": return availability.hasElevation;
+      case "power": return availability.hasPower;
+      case "temperature": return availability.hasTemperature;
+      default: return true;
+    }
+  }), [availability]);
 
   const [pathColorMode, setPathColorMode] = useState<PathColorMode>("heart_rate");
   const [terrainEnabled, setTerrainEnabled] = useState(false);
@@ -460,6 +482,11 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
   useEffect(() => { gpsRecordsRef.current = gpsRecords; }, [gpsRecords]);
   useEffect(() => { distanceUnitRef.current = distanceUnit; }, [distanceUnit]);
   useEffect(() => { pathColorModeRef.current = pathColorMode; }, [pathColorMode]);
+  useEffect(() => {
+    if (!pathColorOptions.includes(pathColorMode)) {
+      setPathColorMode(pathColorOptions.includes("speed") ? "speed" : "solid");
+    }
+  }, [pathColorMode, pathColorOptions]);
   useEffect(() => { terrainEnabledRef.current = terrainEnabled; }, [terrainEnabled]);
   useEffect(() => {
     telemetryEnabledRef.current = telemetryEnabled;
@@ -932,7 +959,7 @@ export function ActivityMap({ records, mapStyle, setMapStyle, lapTimestampsUtc =
           <div className="map-control">
             <span>{t("activityMap.color")}</span>
             <select value={pathColorMode} onChange={(e) => setPathColorMode(e.target.value as PathColorMode)}>
-              {PATH_COLOR_VALUES.map((val) => (
+              {pathColorOptions.map((val) => (
                 <option key={val} value={val}>{pathColorLabels[val]}</option>
               ))}
             </select>

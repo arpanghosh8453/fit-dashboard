@@ -3,6 +3,7 @@ import type { RecordPoint } from "../types";
 import { enableChartWheelPageScroll } from "../lib/chartScroll";
 import { buildHeartRateZones, resolveHeartRateZoneIndex } from "../lib/hrZones";
 import { applyRollingAverageSeries, getDynamicSmoothingWindow } from "../lib/chartSmoothing";
+import { getRecordDataAvailability } from "../lib/recordDataAvailability";
 import {
   convertElevationMeters,
   convertSpeedMps,
@@ -58,9 +59,10 @@ export function ActivityInsights({
   lapTimestampsUtc = [],
   smoothGraphs = true,
 }: Props) {
-    const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
+  const hrZones = buildHeartRateZones(heartRateZoneBoundsBpm);
   const isDark = theme === "dark";
   const { t: tr } = useTranslation();
+  const availability = getRecordDataAvailability(records);
   const axisColor = isDark ? "#8899b8" : "#64748b";
   const gridLine = isDark ? "rgba(100, 140, 220, 0.08)" : "rgba(0, 0, 0, 0.06)";
   const tooltipBg = isDark ? "rgba(14, 22, 45, 0.95)" : "rgba(255, 255, 255, 0.95)";
@@ -120,9 +122,13 @@ export function ActivityInsights({
   const cadenceLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(cadenceLineData, 1, smoothWindow) : cadenceLineData;
   const powerLineDataSmoothed = smoothGraphs ? applyRollingAverageSeries(powerLineData, 1, smoothWindow) : powerLineData;
 
-  const hasPowerData = records.some((r) => typeof r.power === "number" && r.power > 0);
-  const hasHeartRateData = records.some((r) => typeof r.heart_rate === "number" && r.heart_rate > 0);
-  const hasElevationData = records.some((r) => typeof r.altitude_m === "number" && Number.isFinite(r.altitude_m));
+  const hasPowerData = availability.hasPower;
+  const hasHeartRateData = availability.hasHeartRate;
+  const hasElevationData = availability.hasElevation;
+  const hasSpeedData = availability.hasSpeed;
+  const hasCadenceData = availability.hasCadence;
+  const hasTemperatureData = availability.hasTemperature;
+  const hasHeatmapData = hasHeartRateData || hasSpeedData || hasCadenceData || hasTemperatureData;
 
   const lapMarkers = lapTimestampsUtc
     .slice(1)
@@ -294,7 +300,7 @@ export function ActivityInsights({
         let html = formatTooltipHeader(rel);
         for (const row of params) {
           if (row.value?.[1] !== null && row.value?.[1] !== undefined) {
-            const unit = row.seriesName === "Cadence" ? " rpm" : " W";
+            const unit = row.seriesName === tr("insights.power") ? " W" : " rpm";
             html += `<div>${row.marker} ${row.seriesName}: <strong>${Number(row.value[1]).toFixed(2)}${unit}</strong></div>`;
           }
         }
@@ -302,7 +308,7 @@ export function ActivityInsights({
       }
     },
     legend: { textStyle: { color: axisColor, fontSize: 12 }, top: 0 },
-    grid: { left: 44, right: hasPowerData ? 44 : 16, top: 44, bottom: 44 },
+    grid: { left: 44, right: hasPowerData && hasCadenceData ? 44 : 16, top: 44, bottom: 44 },
     xAxis: {
       type: "value",
       axisLabel: { color: axisColor, fontSize: 11, formatter: (val: number) => formatRelTime(val) },
@@ -311,12 +317,12 @@ export function ActivityInsights({
     },
     yAxis: [
       {
-        type: "value", name: "rpm",
+        type: "value", name: hasCadenceData ? "rpm" : "W",
         nameTextStyle: { color: axisColor, fontSize: 11 },
         axisLabel: { color: axisColor, fontSize: 11 },
         splitLine: { lineStyle: { color: gridLine } },
       },
-      ...(hasPowerData ? [{
+      ...(hasPowerData && hasCadenceData ? [{
         type: "value", name: "W",
         nameTextStyle: { color: axisColor, fontSize: 11 },
         axisLabel: { color: axisColor, fontSize: 11 },
@@ -333,7 +339,7 @@ export function ActivityInsights({
       },
     ],
     series: [
-      {
+      ...(hasCadenceData ? [{
         name: tr("insights.cadence"), type: "line", smooth: smoothGraphs, showSymbol: false,
         lineStyle: { width: 2, color: "#22d3ee" },
         sampling: smoothGraphs ? "lttb" : undefined,
@@ -345,9 +351,9 @@ export function ActivityInsights({
           label: { color: axisColor, fontSize: 10, formatter: "{b}", position: "insideEndTop" },
           data: lapMarkers,
         } : undefined,
-      },
+      }] : []),
       ...(hasPowerData ? [{
-        name: tr("insights.power"), type: "line", yAxisIndex: 1, smooth: smoothGraphs, showSymbol: false,
+        name: tr("insights.power"), type: "line", yAxisIndex: hasCadenceData ? 1 : 0, smooth: smoothGraphs, showSymbol: false,
         sampling: smoothGraphs ? "lttb" : undefined,
         data: powerLineDataSmoothed,
         lineStyle: { color: "#f97316" },
@@ -464,32 +470,39 @@ export function ActivityInsights({
 
   const totalRelMs = Math.max(0, (records[records.length - 1]?.timestamp_ms ?? t0) - t0);
   const heatBins = Math.max(1, Math.ceil(totalRelMs / 60000));
-  const heatMetrics = [
-    {
+  type HeatMetric = {
+    label: string;
+    unit: string;
+    getter: (d: (typeof timeline)[number]) => number | null;
+    colors: string[];
+  };
+
+  const heatMetrics: HeatMetric[] = [
+    ...(hasHeartRateData ? [{
       label: "HR",
       unit: "bpm",
       getter: (d: (typeof timeline)[number]) => d.heartRate,
       colors: isDark ? ["#2a0b12", "#dc2626", "#fb7185"] : ["#fee2e2", "#f87171", "#dc2626"],
-    },
-    {
+    }] : []),
+    ...(hasSpeedData ? [{
       label: "Speed",
       unit: speedLabel(distanceUnit),
       getter: (d: (typeof timeline)[number]) => d.speedInUnit,
       colors: isDark ? ["#0e2a1e", "#16a34a", "#4ade80"] : ["#dcfce7", "#4ade80", "#15803d"],
-    },
-    {
+    }] : []),
+    ...(hasCadenceData ? [{
       label: "Cadence",
       unit: "rpm",
       getter: (d: (typeof timeline)[number]) => d.cadence,
       colors: isDark ? ["#2f1a05", "#f59e0b", "#facc15"] : ["#fef3c7", "#fbbf24", "#d97706"],
-    },
-    {
+    }] : []),
+    ...(hasTemperatureData ? [{
       label: "Temp",
       unit: "degC",
       getter: (d: (typeof timeline)[number]) => d.temperatureC,
       colors: isDark ? ["#0b1a3a", "#1d4ed8", "#38bdf8"] : ["#dbeafe", "#60a5fa", "#1d4ed8"],
-    },
-  ] as const;
+    }] : []),
+  ];
 
   const heatRowBounds = heatMetrics.map(() => ({ min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY }));
   const rawHeatCells: Array<Array<{ x: number; raw: number | null }>> = heatMetrics.map(() => []);
@@ -527,8 +540,10 @@ export function ActivityInsights({
       });
     });
 
-  const rowTop = [16, 64, 112, 160];
   const rowHeight = 34;
+  const rowGap = 14;
+  const rowTop = heatMetrics.map((_, idx) => 16 + idx * (rowHeight + rowGap));
+  const heatChartHeight = Math.max(120, 48 + heatMetrics.length * (rowHeight + rowGap));
 
   const heatOption = {
     tooltip: {
@@ -600,11 +615,13 @@ export function ActivityInsights({
 
   return (
     <section className="insight-grid">
-      <article className="panel">
-        <h3>{tr("insights.speedTrend")}</h3>
-        <ReactECharts option={timelineOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
-      </article>
-      {hasPowerData && hasHeartRateData && (
+      {hasSpeedData && (
+        <article className="panel">
+          <h3>{tr("insights.speedTrend")}</h3>
+          <ReactECharts option={timelineOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+        </article>
+      )}
+      {hasHeartRateData && (
         <article className="panel">
           <h3>{tr("insights.heartRateZoneTime")}</h3>
           <ReactECharts option={zoneOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
@@ -616,14 +633,18 @@ export function ActivityInsights({
           <ReactECharts option={hrHistogramOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
         </article>
       )}
-      <article className="panel">
-        <h3>{hasPowerData ? tr("insights.cadenceAndPower") : tr("insights.cadence")}</h3>
-        <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
-      </article>
-      <article className="panel">
-        <h3>{tr("insights.effortHeatmap")}</h3>
-        <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
-      </article>
+      {(hasCadenceData || hasPowerData) && (
+        <article className="panel">
+          <h3>{hasCadenceData && hasPowerData ? tr("insights.cadenceAndPower") : (hasPowerData ? tr("insights.power") : tr("insights.cadence"))}</h3>
+          <ReactECharts option={cadenceOption} onEvents={zoomEvents} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: 280, width: "100%" }} />
+        </article>
+      )}
+      {hasHeatmapData && (
+        <article className="panel">
+          <h3>{tr("insights.effortHeatmap")}</h3>
+          <ReactECharts option={heatOption} onChartReady={enableChartWheelPageScroll} notMerge style={{ height: heatChartHeight, width: "100%" }} />
+        </article>
+      )}
       {hasElevationData && (
         <article className="panel">
           <h3>{tr("insights.elevation")}</h3>

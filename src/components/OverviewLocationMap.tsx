@@ -85,6 +85,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
       }));
     return { type: "FeatureCollection", features };
   }, [records]);
+  const hasLocations = geojson.features.length > 0;
 
   function fitToData(map: maplibregl.Map) {
     if (!geojson.features.length) return;
@@ -219,7 +220,7 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
   }
 
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    if (!hasLocations || !mapContainerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -257,11 +258,11 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [hasLocations]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !hasLocations) return;
 
     map.setStyle(styleFromMap(mapStyle, theme));
     const onIdle = () => {
@@ -273,11 +274,11 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
     return () => {
       map.off("idle", onIdle);
     };
-  }, [mapStyle, theme]);
+  }, [mapStyle, theme, hasLocations]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !hasLocations) return;
 
     if (map.isStyleLoaded()) {
       ensureSourcesAndLayers(map);
@@ -291,7 +292,15 @@ export function OverviewLocationMap({ records, mapStyle, setMapStyle }: Props) {
         map.off("idle", onIdle);
       };
     }
-  }, [geojson]);
+  }, [geojson, hasLocations]);
+
+  useEffect(() => {
+    if (hasLocations || !mapRef.current) return;
+    mapRef.current.remove();
+    mapRef.current = null;
+  }, [hasLocations]);
+
+  if (!hasLocations) return null;
 
   return (
     <div className="panel overview-location-panel">

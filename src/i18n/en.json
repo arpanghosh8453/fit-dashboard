@@ -282,6 +282,7 @@
 
   "compare.selectActivities": "Select up to 4 activities from the sidebar using the checkboxes to compare them.",
   "compare.loading": "Loading comparison data...",
+  "compare.noAvailableCharts": "No comparable telemetry data available.",
   "compare.resetZoom": "Reset Zoom",
   "compare.heartRate": "Heart Rate",
   "compare.speed": "Speed",

@@ -248,6 +248,7 @@
   "trend.duration": "Duración",
   "compare.selectActivities": "Seleccione hasta 4 actividades para comparar.",
   "compare.loading": "Cargando datos de comparación...",
+  "compare.noAvailableCharts": "No hay datos de telemetría comparables disponibles.",
   "compare.resetZoom": "Restablecer zoom",
   "compare.heartRate": "Frecuencia cardíaca",
   "compare.speed": "Velocidad",
