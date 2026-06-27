@@ -194,6 +194,7 @@ fn activity_type_label(sport: &str, sub_sport: Option<&str>) -> String {
     let sport_lower = sport.trim().to_lowercase();
     if sport_lower == "cycling" {
         match sub_sport_lower.as_str() {
+            "e_bike_fitness" => return "eBiking".to_string(),
             "indoor_cycling" | "spin" => return "Indoor Cycling".to_string(),
             "mountain" | "mountain_biking" => return "Mountain Biking".to_string(),
             _ => {}
@@ -1067,6 +1068,7 @@ mod tests {
 
     #[test]
     fn builds_readable_activity_type_labels() {
+        assert_eq!(activity_type_label("cycling", Some("e_bike_fitness")), "eBiking");
         assert_eq!(activity_type_label("cycling", Some("road")), "Road Cycling");
         assert_eq!(activity_type_label("cycling", Some("mountain")), "Mountain Biking");
         assert_eq!(

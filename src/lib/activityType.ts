@@ -10,6 +10,7 @@ type ActivityMetadata = {
 const IGNORED_SUB_SPORTS = new Set(["generic", "all", "unknown", "invalid"]);
 
 const CYCLING_SUB_SPORT_LABELS: Record<string, string> = {
+  e_bike_fitness: "eBiking",
   indoor_cycling: "Indoor Cycling",
   spin: "Indoor Cycling",
   mountain: "Mountain Biking",
