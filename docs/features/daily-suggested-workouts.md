@@ -26,13 +26,12 @@ The investigation focused on:
   but no `Workout` or `WorkoutStep` messages and no workout-title strings
 - matching Garmin Connect GPX and TCX exports for the Daily Suggested examples
 
-## Current App Behaviour
+## Baseline App Behaviour
 
-On the `feature-33-daily-workouts` branch, the current parser imports these
-FIT files as normal activities. Regular telemetry, session summaries, and lap
-summaries are available.
+On upstream `main`, FIT Dashboard imports these FIT files as normal activities.
+Regular telemetry, session summaries, and lap summaries are available.
 
-The current parser does not preserve the Garmin planned-workout structure:
+The upstream parser does not preserve the Garmin planned-workout structure:
 
 - `Workout.wkt_name`
 - `Workout.wkt_description`
@@ -44,8 +43,10 @@ The current parser does not preserve the Garmin planned-workout structure:
 - `Lap.wkt_step_index`
 - lap `intensity`, when present
 
-As a result, FIT Dashboard cannot currently show Garmin-style `Intervals`
-tables for these activities.
+As a result, upstream FIT Dashboard cannot show Garmin-style `Intervals` tables
+for these activities. The `feature-33-daily-workouts` branch preserves this
+metadata in `metadata_json` and uses lap-to-step mappings to show an
+endurance-focused `Intervals` table when the FIT file contains that structure.
 
 ## File Format Findings
 
@@ -263,8 +264,8 @@ The table can be reconstructed from:
 - lap `total_timer_time`
 - lap `total_distance`
 
-For first implementation, showing recorded lap rows with workout-derived labels
-is likely enough. Garmin-style group rows, such as `Warm Up 1 - 3`, can be added
+For this implementation, showing recorded lap rows with workout-derived labels
+is enough. Garmin-style group rows, such as `Warm Up 1 - 3`, can be added
 after the raw step/lap mapping is preserved.
 
 ## Interval Table Reconstruction Process
@@ -483,12 +484,12 @@ initial endurance interval table:
   `ExerciseTitle` support to build a `Sets` or `Exercises` table
 
 Strength/training planned workouts are not in the initial implementation scope.
-The first implementation should preserve the generic planned-workout metadata
-where practical, but the first UI should target endurance planned workouts with
-lap-based interval reconstruction. Strength/training support needs further
-investigation before implementation.
+This branch preserves generic planned-workout metadata where practical, but the
+initial UI targets endurance planned workouts with lap-based interval
+reconstruction. Strength/training support needs further investigation before
+implementation.
 
-## Initial Implementation Scope
+## Implementation Scope
 
 Initial scope:
 
@@ -504,8 +505,8 @@ Initial scope:
 - Show an endurance-focused `Intervals` table for planned workouts that have
   lap-to-step mappings.
 
-The first implementation should keep these fields in the existing activity
-`metadata_json` field. That avoids a database migration while preserving the raw
+This implementation keeps these fields in the existing activity `metadata_json`
+field. That avoids a database migration while preserving the raw
 planned-workout structure for display and future export support.
 
 Proposed metadata shape:
@@ -659,8 +660,8 @@ Known sample values:
 - Are Garmin Connect execution scores present in standard FIT fields that
   require additional enum decoding, or are they only available through Garmin
   Connect outside the exported FIT?
-- Should first implementation show only recorded intervals, or also derived
-  Garmin-style group rows?
+- Should a future implementation add derived Garmin-style group rows, such
+  as `Warm Up 1 - 3`, above the recorded intervals?
 - Should workout names influence `activity_name` on import, or should FIT
   Dashboard first add a separate sport/subsport indicator so sport context is
   not lost when titles become location-plus-workout-name?
