@@ -3,13 +3,15 @@
 ## Summary
 
 Garmin planned workout activities import as regular activities today, but their
-FIT files contain extra planned-workout metadata. This applies to both Daily
-Suggested Workouts and Garmin Coaching Plan workouts. The preserved metadata can
+FIT files contain extra planned-workout metadata. This applies to Daily
+Suggested Workouts, Garmin Coaching Plan workouts, and third-party workouts
+synced into Garmin and recorded on a Garmin device. The preserved metadata can
 support a workout-aware interval table instead of showing only generic laps.
 
 This document records current findings from sample files. It keeps the original
-Daily Suggested Workout examples and adds a Garmin Coaching Plan cycling sample
-that uses the same FIT structures.
+Daily Suggested Workout examples, adds a Garmin Coaching Plan cycling sample,
+and adds a TrainerRoad workout that was synced into Garmin and recorded as a
+Garmin planned workout using the same FIT structures.
 
 The investigation focused on:
 
@@ -17,6 +19,11 @@ The investigation focused on:
 - `22730347417_ACTIVITY.fit` - Daily Suggested running base workout
 - `23122091367_ACTIVITY.fit` - Daily Suggested running sprint workout
 - `23259835588_ACTIVITY.fit` - Garmin Coaching Plan cycling sprint workout
+- `23411360356_ACTIVITY.fit` - TrainerRoad `Stickney` workout synced into
+  Garmin and recorded as a Garmin planned workout
+- `23460091826_ACTIVITY.fit` and `23432217406_ACTIVITY.fit` - TrainerRoad-created
+  activity FIT counterexamples; these have `FileId.manufacturer=trainer_road`
+  but no `Workout` or `WorkoutStep` messages and no workout-title strings
 - matching Garmin Connect GPX and TCX exports for the Daily Suggested examples
 
 ## Current App Behaviour
@@ -30,7 +37,10 @@ The current parser does not preserve the Garmin planned-workout structure:
 - `Workout.wkt_name`
 - `Workout.wkt_description`
 - `Workout.num_valid_steps`
+- `Workout.capabilities`
 - `WorkoutStep` definitions
+- `WorkoutStep.notes`, when present
+- `TrainingFile` metadata
 - `Lap.wkt_step_index`
 - lap `intensity`, when present
 
@@ -50,6 +60,7 @@ Workout.wkt_name
 Workout.wkt_description
 Workout.num_valid_steps
 Workout.sport
+Workout.capabilities
 ```
 
 Daily Suggested running example:
@@ -73,6 +84,34 @@ Garmin Coaching Plan cycling example:
 }
 ```
 
+TrainerRoad workout synced into Garmin and recorded on a Garmin device:
+
+```json
+{
+  "wkt_name": "Stickney",
+  "capabilities": "tcx",
+  "sport": "cycling",
+  "sub_sport": "generic"
+}
+```
+
+That activity also contains `TrainingFile` provenance:
+
+```json
+{
+  "type": "workout",
+  "manufacturer": "garmin",
+  "garmin_product": "connect"
+}
+```
+
+This sample is useful because it is not a Daily Suggested Workout and not a
+Garmin Coaching Plan workout. It shows that third-party planned workouts can use
+the same Garmin planned-workout FIT structures after they are synced into Garmin
+and recorded on a Garmin device. The activity `FileId.manufacturer` is still
+`garmin` (FIT manufacturer id `1`), so the FIT does not obviously preserve
+TrainerRoad as the original workout source.
+
 The samples also contain `WorkoutStep` messages. Fields observed include:
 
 ```text
@@ -85,6 +124,7 @@ WorkoutStep.target_value
 WorkoutStep.custom_target_value_low
 WorkoutStep.custom_target_value_high
 WorkoutStep.intensity
+WorkoutStep.notes
 ```
 
 Examples of planned-workout descriptions or step strings found in raw FIT
@@ -94,11 +134,24 @@ strings:
 2x15x0:10@360W
 2x16x0:10@355W
 5x0:10@3:25/km
+15 minutes warmup.
+Hit lap to start main set.
+55 minutes Endurance.
+Spin easy for 20 minutes.
+Hit lap when finished.
 ```
 
 The first two describe cycling sprint workouts. The first means two sets of
 fifteen 10-second sprint efforts at 360 W; the Coaching Plan sample uses two
 sets of sixteen 10-second sprint efforts at 355 W.
+
+The two TrainerRoad-created activity FIT counterexamples differ from the Garmin
+recorded sample. They contain `FileId.manufacturer=trainer_road` (FIT
+manufacturer id `281`), session/lap summary data, and lap interval rows, but no
+decoded `Workout`, `WorkoutStep`, `Sport.name`, `TrainingFile`, or workout-title
+strings. FIT Dashboard cannot
+recover names such as `Three Sisters 2`, `Tallac - 4`, or `Ramp Test` from those
+files if they are not present in the FIT bytes.
 
 FIT lap messages link recorded laps back to planned workout steps with:
 
@@ -157,6 +210,12 @@ workout.num_valid_steps
 workout.sport
 workout.wkt_name
 workout.wkt_description
+workout.capabilities
+
+training_file
+training_file.type
+training_file.manufacturer
+training_file.garmin_product
 
 workout_step
 workout_step.message_index
@@ -168,6 +227,7 @@ workout_step.target_value
 workout_step.custom_target_value_low
 workout_step.custom_target_value_high
 workout_step.intensity
+workout_step.notes
 
 laps[].wkt_step_index
 ```
@@ -193,6 +253,7 @@ The table can be reconstructed from:
 - `WorkoutStep.target_type`
 - `WorkoutStep.custom_target_value_low/high`
 - `WorkoutStep.intensity`
+- `WorkoutStep.notes`
 - `WorkoutStep.repeat_steps`
 - `WorkoutStep.duration_step`
 - `Lap.wkt_step_index`
@@ -431,9 +492,13 @@ investigation before implementation.
 
 Initial scope:
 
-- Preserve `Workout` metadata in activity metadata JSON.
+- Preserve `Workout` metadata in activity metadata JSON, including
+  `wkt_name`, `wkt_description`, `sport`, `sub_sport`, `num_valid_steps`, and
+  `capabilities` when present.
+- Preserve `TrainingFile` metadata, including type, manufacturer, and Garmin
+  product when present.
 - Preserve `WorkoutStep` metadata, including message index, duration, target,
-  intensity, repeat/control fields, and available names or descriptions.
+  intensity, repeat/control fields, notes, and available names or descriptions.
 - Preserve lap `wkt_step_index`, `lap_trigger`, and lap `intensity` when
   present.
 - Show an endurance-focused `Intervals` table for planned workouts that have
@@ -445,6 +510,8 @@ Out of initial scope:
 - Garmin-style derived group rows.
 - Execution score calculation or extraction.
 - Activity-name changes based on workout name.
+- Recovering workout names from TrainerRoad-created activity FIT files that do
+  not contain `Workout` metadata or workout-title strings.
 
 ## Activity Naming Considerations
 
@@ -466,6 +533,10 @@ Title: Calgary - Sprint
 Icon: cycling
 Subtext: Road Cycling
 ```
+
+The Garmin-recorded TrainerRoad `Stickney` sample also stores its workout name
+in `Workout.wkt_name`, which supports the same naming model for third-party
+workouts synced through Garmin.
 
 This suggests Garmin uses `Workout.wkt_name` as a display-title suffix when a
 planned workout exists, while preserving canonical sport/subsport separately.
