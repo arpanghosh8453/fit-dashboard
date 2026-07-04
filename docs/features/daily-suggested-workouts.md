@@ -504,6 +504,56 @@ Initial scope:
 - Show an endurance-focused `Intervals` table for planned workouts that have
   lap-to-step mappings.
 
+The first implementation should keep these fields in the existing activity
+`metadata_json` field. That avoids a database migration while preserving the raw
+planned-workout structure for display and future export support.
+
+Proposed metadata shape:
+
+```json
+{
+  "workout": {
+    "wkt_name": "Sprint",
+    "wkt_description": "2x16x0:10@355W",
+    "sport": "cycling",
+    "sub_sport": "generic",
+    "num_valid_steps": 7,
+    "capabilities": "tcx"
+  },
+  "training_file": {
+    "type": "workout",
+    "manufacturer": "garmin",
+    "garmin_product": "connect"
+  },
+  "workout_steps": [
+    {
+      "message_index": 0,
+      "wkt_step_name": "Warm Up",
+      "duration_type": "time",
+      "duration_value": 1200,
+      "target_type": "power_3s",
+      "custom_target_value_low": 111,
+      "custom_target_value_high": 152,
+      "intensity": "warmup",
+      "notes": null
+    }
+  ],
+  "laps": [
+    {
+      "wkt_step_index": 0,
+      "lap_trigger": "time",
+      "intensity": "warmup",
+      "total_timer_time_s": 1200,
+      "total_distance_m": 8200
+    }
+  ]
+}
+```
+
+The Rust `fitparser` dependency used by this app exposes `Workout`,
+`WorkoutStep`, and `TrainingFile` messages directly, so implementation can use
+the existing parse loop rather than introducing a second FIT parser.
+
 Out of initial scope:
 
 - Strength/training `Set` and `ExerciseTitle` UI.
@@ -603,10 +653,6 @@ Known sample values:
 
 ## Open Questions
 
-- Can Rust `fitparser` expose all `Workout` and `WorkoutStep` messages,
-  including repeat/control fields, descriptions, intensities, and target ranges?
-  The JavaScript parser used in investigation collapsed repeated `WorkoutStep`
-  messages into a single `workout_step` object.
 - What is the minimal useful display model for strength/training planned
   workouts that use `Set.wkt_step_index` and `ExerciseTitle` instead of
   lap messages?
