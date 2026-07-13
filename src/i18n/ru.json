@@ -173,5 +173,10 @@
   "import.bulkDeleteFinishedWithFailures": "Массовое удаление завершено с ошибками ({count}): {reasons}",
   "import.bulkDeleteCompleted": "Массовое удаление завершено.",
   "import.bulkDeleteRefreshFailed": "Массовое удаление завершено, но не удалось обновить данные: {error}",
-  "import.preparingSyncQueue": "Подготовка очереди синхронизации..."
+  "import.preparingSyncQueue": "Подготовка очереди синхронизации...",
+  "settings.customizeHrZones": "Настроить зоны ЧСС",
+  "settings.hrZonesTitle": "Зоны частоты сердечных сокращений",
+  "settings.hrZonesDescription": "Перетащите маркеры для настройки границ зон",
+  "settings.hrZonesReset": "Сбросить по умолчанию",
+  "settings.hrZonesSave": "Сохранить"
 }

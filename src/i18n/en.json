@@ -224,6 +224,11 @@
   "settings.confirmClearBlacklist": "Clear all blacklisted file hashes? Deleted activities will be importable again.",
   "settings.clearedHashes": "Cleared {count} blacklisted hash(es).",
   "settings.clearBlacklistFailed": "Failed to clear blacklist: {error}",
+  "settings.customizeHrZones": "Customize HR Zones",
+  "settings.hrZonesTitle": "Heart Rate Zones",
+  "settings.hrZonesDescription": "Drag the handles to adjust zone boundaries",
+  "settings.hrZonesReset": "Reset to Defaults",
+  "settings.hrZonesSave": "Save",
 
   "heatmap.activityContributions": "Activity Contributions",
   "heatmap.less": "Less",

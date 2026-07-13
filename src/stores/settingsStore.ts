@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "../lib/api";
+import { DEFAULT_HR_ZONE_BOUNDS } from "../lib/hrZones";
 
 type Theme = "light" | "dark";
 type DistanceUnit = "km" | "mi";
@@ -14,6 +15,7 @@ type SettingsState = {
   timeFormat: TimeFormat;
   mapStyle: MapStyle;
   overviewTableDays: number;
+  hrZoneBounds: number[];
   supporterBadge: boolean;
   donationDismissed: boolean;
   showSettings: boolean;
@@ -25,6 +27,7 @@ type SettingsState = {
   setTimeFormat: (format: TimeFormat) => void;
   setMapStyle: (style: MapStyle) => void;
   setOverviewTableDays: (days: number) => void;
+  setHrZoneBounds: (bounds: number[]) => void;
   loadSupporterStatus: () => Promise<void>;
   verifySupporterCode: (code: string) => Promise<boolean>;
   removeSupporterBadge: () => Promise<void>;
@@ -40,6 +43,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   timeFormat: "24h",
   mapStyle: "default",
   overviewTableDays: 7,
+  hrZoneBounds: [...DEFAULT_HR_ZONE_BOUNDS],
   supporterBadge: false,
   donationDismissed: false,
   showSettings: false,
@@ -56,6 +60,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         timeFormat: parsed.timeFormat ?? "24h",
         mapStyle: parsed.mapStyle ?? "default",
         overviewTableDays: Number.isFinite(parsed.overviewTableDays) ? Math.max(1, Math.round(parsed.overviewTableDays)) : 7,
+        hrZoneBounds: Array.isArray(parsed.hrZoneBounds) && parsed.hrZoneBounds.length === 4
+          ? parsed.hrZoneBounds.map(Number).filter(Number.isFinite)
+          : [...DEFAULT_HR_ZONE_BOUNDS],
       });
     } catch {
       // Ignore invalid persisted data.
@@ -93,6 +100,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const clampedDays = Math.max(1, Math.round(overviewTableDays));
     set({ overviewTableDays: clampedDays });
     persist({ ...get(), overviewTableDays: clampedDays });
+  },
+
+  setHrZoneBounds: (hrZoneBounds) => {
+    set({ hrZoneBounds });
+    persist({ ...get(), hrZoneBounds });
   },
 
   loadSupporterStatus: async () => {
@@ -150,6 +162,7 @@ function persist(state: SettingsState) {
       timeFormat: state.timeFormat,
       mapStyle: state.mapStyle,
       overviewTableDays: state.overviewTableDays,
+      hrZoneBounds: state.hrZoneBounds,
     })
   );
 }
