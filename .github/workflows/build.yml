@@ -126,6 +126,8 @@ jobs:
           {
             echo "RUSTFLAGS=-C target-feature=+crt-static"
             echo "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+            echo "CXXFLAGS_x86_64_pc_windows_msvc=/std:c++17 /EHsc"
+            echo "CXXFLAGS_x86_64-pc-windows-msvc=/std:c++17 /EHsc"
           } >> "$GITHUB_ENV"
 
       - name: Delete stale release assets for current target
