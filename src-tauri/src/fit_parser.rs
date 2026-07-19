@@ -46,6 +46,56 @@ fn value_string(v: &Value) -> String {
     }
 }
 
+fn fit_value_to_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Timestamp(dt) => serde_json::Value::String(dt.to_rfc3339()),
+        Value::Byte(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::Enum(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::SInt8(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::UInt8(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::UInt8z(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::SInt16(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::UInt16(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::UInt16z(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::SInt32(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::UInt32(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::UInt32z(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::SInt64(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::UInt64(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::UInt64z(x) => serde_json::Value::Number(serde_json::Number::from(*x)),
+        Value::Float32(x) => serde_json::Number::from_f64(*x as f64)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Value::Float64(x) => serde_json::Number::from_f64(*x)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Value::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::Value::String(trimmed.to_string())
+            }
+        }
+        Value::Array(values) => serde_json::Value::Array(values.iter().map(fit_value_to_json).collect()),
+    }
+}
+
+fn insert_fit_json_field(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    name: &str,
+    value: &Value,
+) {
+    let json_value = fit_value_to_json(value);
+    match &json_value {
+        serde_json::Value::Null => {}
+        serde_json::Value::Array(values) if values.is_empty() => {}
+        _ => {
+            map.insert(name.to_string(), json_value);
+        }
+    }
+}
+
 fn combine_device_name(
     product_name: Option<String>,
     manufacturer: Option<String>,
@@ -310,6 +360,9 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut session_total_calories: Option<i64> = None;
     let mut lap_ranges: Vec<serde_json::Value> = Vec::new();
     let mut heart_rate_zone_bounds_bpm: Vec<i64> = Vec::new();
+    let mut workout_metadata = serde_json::Map::new();
+    let mut training_file_metadata = serde_json::Map::new();
+    let mut workout_steps: Vec<serde_json::Value> = Vec::new();
 
     let mut min_ts: Option<i64> = None;
     let mut max_ts: Option<i64> = None;
@@ -485,6 +538,44 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     _ => {}
                 }
             }
+        } else if rec.kind() == MesgNum::Workout {
+            for field in rec.fields() {
+                match field.name() {
+                    "wkt_name" | "wkt_description" | "num_valid_steps" | "sport"
+                    | "sub_sport" | "capabilities" => {
+                        insert_fit_json_field(&mut workout_metadata, field.name(), field.value());
+                    }
+                    _ => {}
+                }
+            }
+        } else if rec.kind() == MesgNum::TrainingFile {
+            for field in rec.fields() {
+                match field.name() {
+                    "type" | "manufacturer" | "garmin_product" | "product" => {
+                        insert_fit_json_field(&mut training_file_metadata, field.name(), field.value());
+                    }
+                    _ => {}
+                }
+            }
+        } else if rec.kind() == MesgNum::WorkoutStep {
+            let mut step = serde_json::Map::new();
+            for field in rec.fields() {
+                match field.name() {
+                    "message_index" | "wkt_step_name" | "duration_type" | "duration_value"
+                    | "target_type" | "target_value" | "custom_target_value_low"
+                    | "custom_target_value_high" | "intensity" | "notes" | "repeat_steps"
+                    | "duration_step" | "equipment" | "exercise_category" | "exercise_name"
+                    | "weight" | "secondary_target_type" | "secondary_target_value"
+                    | "secondary_custom_target_value_low"
+                    | "secondary_custom_target_value_high" => {
+                        insert_fit_json_field(&mut step, field.name(), field.value());
+                    }
+                    _ => {}
+                }
+            }
+            if !step.is_empty() {
+                workout_steps.push(serde_json::Value::Object(step));
+            }
         } else if rec.kind() == MesgNum::Value(140){
             for field in rec.fields() {
                 if field.name() == "unknown_field_7" {
@@ -509,6 +600,9 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             let mut lap_max_cadence: Option<i64> = None;
             let mut lap_total_calories: Option<i64> = None;
             let mut lap_best_speed_m_s: Option<f64> = None;
+            let mut lap_wkt_step_index: Option<i64> = None;
+            let mut lap_trigger: Option<String> = None;
+            let mut lap_intensity: Option<String> = None;
             for field in rec.fields() {
                 match field.name() {
                     "start_time" => lap_start_ms = value_timestamp_ms(field.value()),
@@ -541,6 +635,19 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "avg_cadence" => lap_avg_cadence = value_i64(field.value()),
                     "max_cadence" => lap_max_cadence = value_i64(field.value()),
                     "total_calories" => lap_total_calories = value_i64(field.value()),
+                    "wkt_step_index" => lap_wkt_step_index = value_i64(field.value()),
+                    "lap_trigger" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            lap_trigger = Some(value.trim().to_string());
+                        }
+                    }
+                    "intensity" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            lap_intensity = Some(value.trim().to_string());
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -564,7 +671,10 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                 "avg_cadence": lap_avg_cadence,
                 "max_cadence": lap_max_cadence,
                 "total_calories": lap_total_calories,
-                "best_speed_m_s": lap_best_speed_m_s
+                "best_speed_m_s": lap_best_speed_m_s,
+                "wkt_step_index": lap_wkt_step_index,
+                "lap_trigger": lap_trigger,
+                "intensity": lap_intensity
             }));
         }
 
@@ -588,6 +698,11 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
 
     heart_rate_zone_bounds_bpm.sort_unstable();
     heart_rate_zone_bounds_bpm.dedup();
+    workout_steps.sort_by_key(|step| {
+        step.get("message_index")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(i64::MAX)
+    });
 
     if file_id_type_name.is_some() || file_id_type_code.is_some() {
         let type_name = file_id_type_name
@@ -635,6 +750,17 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         .or(device_info_creator_serial)
         .or(device_info_fallback_serial);
 
+    let workout_json = if workout_metadata.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::Value::Object(workout_metadata)
+    };
+    let training_file_json = if training_file_metadata.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::Value::Object(training_file_metadata)
+    };
+
     let metadata_json = serde_json::json!({
         "record_count": points.len(),
         "device": device,
@@ -654,6 +780,9 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             "vo2_max": vo2_max
         },
         "heart_rate_zone_bounds_bpm": heart_rate_zone_bounds_bpm,
+        "workout": workout_json,
+        "workout_steps": workout_steps,
+        "training_file": training_file_json,
         "session": {
             "beginning_body_battery": session_beginning_body_battery,
             "ending_body_battery": session_ending_body_battery,
