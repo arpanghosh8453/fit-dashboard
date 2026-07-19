@@ -3,6 +3,7 @@ import type { Activity } from "../types";
 import { useSettingsStore } from "../stores/settingsStore";
 import { distanceDivisor, distanceLabel, speedLabel, type DistanceUnit } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
+import { formatActivityTypeLabel } from "../lib/activityType";
 
 type Props = {
   activities: Activity[];
@@ -95,7 +96,7 @@ export function OverviewActivityTable({ activities, distanceUnit, timeFormat }: 
           id: activity.id,
           date,
           name: activity.activity_name || activity.file_name,
-          sport: activity.sport || "Unknown",
+          sport: formatActivityTypeLabel(activity),
           durationS: activity.duration_s,
           distanceM: activity.distance_m,
           avgSpeedInUnit,

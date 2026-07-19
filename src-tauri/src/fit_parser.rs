@@ -148,20 +148,79 @@ fn child_node<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<roxmltree
         .find(|n| n.is_element() && n.tag_name().name() == name)
 }
 
-fn title_case_sport(sport: &str) -> String {
-    if sport.is_empty() {
-        return "Activity".to_string();
-    }
-    let mut chars = sport.chars();
-    let Some(first) = chars.next() else {
-        return "Activity".to_string();
-    };
-    first.to_uppercase().collect::<String>() + chars.as_str()
+fn title_case_words(value: &str) -> String {
+    let words: Vec<String> = value
+        .split(|c: char| c == '_' || c == '-' || c.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let lower = part.to_lowercase();
+            let mut chars = lower.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    words.join(" ")
 }
 
-fn build_activity_name(file_name: &str, sport: &str, points: &[RecordPoint]) -> String {
-    let fallback = strip_known_extension(file_name);
+fn title_case_sport(sport: &str) -> String {
+    let sport = sport.trim();
+    if sport.is_empty() || sport.eq_ignore_ascii_case("unknown") {
+        return "Activity".to_string();
+    }
+
+    let label = title_case_words(sport);
+    if label.is_empty() {
+        "Activity".to_string()
+    } else {
+        label
+    }
+}
+
+fn activity_type_label(sport: &str, sub_sport: Option<&str>) -> String {
     let sport_label = title_case_sport(sport);
+    let Some(raw_sub_sport) = sub_sport.map(str::trim).filter(|s| !s.is_empty()) else {
+        return sport_label;
+    };
+
+    let sub_sport_lower = raw_sub_sport.to_lowercase();
+    if matches!(sub_sport_lower.as_str(), "generic" | "all" | "unknown" | "invalid") {
+        return sport_label;
+    }
+
+    let sport_lower = sport.trim().to_lowercase();
+    if sport_lower == "cycling" {
+        match sub_sport_lower.as_str() {
+            "e_bike_fitness" => return "eBiking".to_string(),
+            "indoor_cycling" | "spin" => return "Indoor Cycling".to_string(),
+            "mountain" | "mountain_biking" => return "Mountain Biking".to_string(),
+            _ => {}
+        }
+    }
+
+    let sub_sport_label = title_case_words(raw_sub_sport);
+    if sub_sport_label.is_empty() {
+        return sport_label;
+    }
+
+    if sport_label == "Activity" || sub_sport_lower.contains(sport_lower.as_str()) {
+        sub_sport_label
+    } else {
+        format!("{sub_sport_label} {sport_label}")
+    }
+}
+
+fn build_activity_name(
+    file_name: &str,
+    sport: &str,
+    sub_sport: Option<&str>,
+    points: &[RecordPoint],
+) -> String {
+    let fallback = strip_known_extension(file_name);
+    let activity_label = activity_type_label(sport, sub_sport);
 
     if let Some(pos) = points.iter().find(|p| p.latitude.is_some() && p.longitude.is_some()) {
         let geocoder = reverse_geocoder::ReverseGeocoder::new();
@@ -177,7 +236,7 @@ fn build_activity_name(file_name: &str, sport: &str, points: &[RecordPoint]) -> 
         }
         let loc = loc_parts.join(", ");
         if !loc.is_empty() {
-            return format!("{} — {}", loc, sport_label);
+            return format!("{} — {}", loc, activity_label);
         }
     }
 
@@ -286,6 +345,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
 
     let mut points: Vec<RecordPoint> = Vec::new();
     let mut sport = String::from("unknown");
+    let mut sub_sport: Option<String> = None;
     let mut device = String::new();
     let mut file_id_product_name: Option<String> = None;
     let mut file_id_manufacturer: Option<String> = None;
@@ -377,6 +437,12 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             for field in rec.fields() {
                 match field.name() {
                     "sport" => sport = value_string(field.value()).to_lowercase(),
+                    "sub_sport" => {
+                        let value = value_string(field.value()).to_lowercase();
+                        if !value.trim().is_empty() {
+                            sub_sport = Some(value);
+                        }
+                    }
                     "beginning_body_battery" | "start_body_battery" => {
                         session_beginning_body_battery = value_i64(field.value())
                     }
@@ -639,6 +705,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         "record_count": points.len(),
         "device": device,
         "sport": sport,
+        "sub_sport": sub_sport.as_deref(),
         "source_format": "fit",
         "file_id": {
             "product_name": file_id_combined_name,
@@ -669,7 +736,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     })
     .to_string();
 
-    let activity_name = build_activity_name(file_name, &sport, &points);
+    let activity_name = build_activity_name(file_name, &sport, sub_sport.as_deref(), &points);
 
     Ok(ParsedActivity {
         file_name: file_name.to_string(),
@@ -809,7 +876,7 @@ fn parse_tcx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     })
     .to_string();
 
-    let activity_name = build_activity_name(file_name, &sport, &points);
+    let activity_name = build_activity_name(file_name, &sport, None, &points);
 
     Ok(ParsedActivity {
         file_name: file_name.to_string(),
@@ -956,7 +1023,7 @@ fn parse_gpx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     })
     .to_string();
 
-    let activity_name = build_activity_name(file_name, &sport, &points);
+    let activity_name = build_activity_name(file_name, &sport, None, &points);
 
     Ok(ParsedActivity {
         file_name: file_name.to_string(),
@@ -978,4 +1045,50 @@ fn parse_gpx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         records: points,
         metadata_json,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gps_point() -> RecordPoint {
+        RecordPoint {
+            timestamp_ms: 0,
+            latitude: Some(43.6532),
+            longitude: Some(-79.3832),
+            altitude_m: None,
+            distance_m: None,
+            speed_m_s: None,
+            cadence: None,
+            heart_rate: None,
+            power: None,
+            temperature_c: None,
+        }
+    }
+
+    #[test]
+    fn builds_readable_activity_type_labels() {
+        assert_eq!(activity_type_label("cycling", Some("e_bike_fitness")), "eBiking");
+        assert_eq!(activity_type_label("cycling", Some("road")), "Road Cycling");
+        assert_eq!(activity_type_label("cycling", Some("mountain")), "Mountain Biking");
+        assert_eq!(
+            activity_type_label("cycling", Some("gravel_cycling")),
+            "Gravel Cycling"
+        );
+        assert_eq!(activity_type_label("running", Some("trail")), "Trail Running");
+        assert_eq!(activity_type_label("running", Some("generic")), "Running");
+        assert_eq!(activity_type_label("unknown", Some("generic")), "Activity");
+    }
+
+    #[test]
+    fn uses_sub_sport_in_gps_activity_names() {
+        let name = build_activity_name(
+            "activity.fit",
+            "cycling",
+            Some("road"),
+            &[gps_point()],
+        );
+
+        assert!(name.ends_with("— Road Cycling"), "unexpected name: {name}");
+    }
 }
