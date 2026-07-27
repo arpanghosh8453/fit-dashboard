@@ -1399,6 +1399,46 @@ button:focus-visible {
   border-color: rgba(245, 158, 11, 0.2);
 }
 
+.badge.device.has-accessories {
+  position: relative;
+  cursor: default;
+  outline: none;
+}
+
+.device-accessory-popover {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 20;
+  display: none;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 2rem));
+  padding: 0.45rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  white-space: normal;
+}
+
+.badge.device.has-accessories:hover .device-accessory-popover,
+.badge.device.has-accessories:focus .device-accessory-popover,
+.badge.device.has-accessories:focus-within .device-accessory-popover {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.device-accessory-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.74rem;
+  color: var(--text);
+  line-height: 1.25;
+}
+
 .detail-stats-strip {
   display: flex;
   gap: 1.5rem;

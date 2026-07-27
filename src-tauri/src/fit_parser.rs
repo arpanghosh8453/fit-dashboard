@@ -4,6 +4,10 @@ use anyhow::{anyhow, Context, Result};
 use fitparser::{profile::MesgNum, Value};
 use sha2::{Digest, Sha256};
 
+use crate::device_metadata::{
+    build_devices, decoded_file_id, decoded_file_id_display_name, RawDeviceInfo, RawDeviceType,
+    RawFileId,
+};
 use crate::models::{ParsedActivity, RecordPoint};
 
 const NON_ACTIVITY_FIT_MARKER: &str = "non-activity-fit:";
@@ -111,6 +115,10 @@ fn value_timestamp_ms(v: &Value) -> Option<i64> {
         Value::String(s) => parse_timestamp_ms(s),
         _ => None,
     }
+}
+
+fn format_fit_version(v: &Value) -> Option<String> {
+    value_f64(v).map(|value| format!("{value:.2}"))
 }
 
 fn strip_known_extension(file_name: &str) -> String {
@@ -293,6 +301,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut file_id_serial_number: Option<i64> = None;
     let mut file_id_type_name: Option<String> = None;
     let mut file_id_type_code: Option<i64> = None;
+    let mut raw_file_id = RawFileId::default();
+    let mut raw_device_info_records: Vec<RawDeviceInfo> = Vec::new();
     let mut device_info_fallback_name: Option<String> = None;
     let mut device_info_fallback_serial: Option<i64> = None;
     let mut device_info_creator_name: Option<String> = None;
@@ -394,6 +404,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                 }
             }
         } else if rec.kind() == MesgNum::DeviceInfo {
+            let mut raw_device_info = RawDeviceInfo::default();
             let mut candidate_product_name: Option<String> = None;
             let mut candidate_manufacturer: Option<String> = None;
             let mut candidate_product: Option<String> = None;
@@ -402,32 +413,91 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
 
             for field in rec.fields() {
                 match field.name() {
+                    "timestamp" => {
+                        raw_device_info.timestamp_ms = value_timestamp_ms(field.value());
+                    }
                     "device_index" => {
-                        let v = value_string(field.value()).to_lowercase();
-                        if v == "creator" || value_i64(field.value()) == Some(0) {
+                        let v = value_string(field.value());
+                        raw_device_info.device_index_value = Some(v.clone());
+                        raw_device_info.device_index_code = value_i64(field.value());
+                        if v.eq_ignore_ascii_case("creator") || raw_device_info.device_index_code == Some(0) {
                             is_creator = true;
                         }
+                    }
+                    "source_type" => {
+                        raw_device_info.source_type_value = Some(value_string(field.value()));
+                        raw_device_info.source_type_code = value_i64(field.value());
                     }
                     "product_name" => {
                         let value = value_string(field.value());
                         if !value.trim().is_empty() {
+                            raw_device_info.product_name = Some(value.clone());
                             candidate_product_name = Some(value);
                         }
                     }
                     "manufacturer" => {
                         let value = value_string(field.value());
                         if !value.trim().is_empty() {
+                            raw_device_info.manufacturer_value = Some(value.clone());
                             candidate_manufacturer = Some(value);
                         }
                     }
                     "garmin_product" | "product" | "favero_product" => {
                         let value = value_string(field.value());
                         if !value.trim().is_empty() {
+                            raw_device_info.product_field = Some(field.name().to_string());
+                            raw_device_info.product_value = Some(value.clone());
                             candidate_product = Some(value);
                         }
                     }
                     "serial_number" => {
                         candidate_serial = value_i64(field.value()).filter(|v| *v > 0);
+                        raw_device_info.serial_number = candidate_serial;
+                    }
+                    "software_version" => {
+                        raw_device_info.software_version = format_fit_version(field.value());
+                    }
+                    "hardware_version" => {
+                        raw_device_info.hardware_version = value_i64(field.value());
+                    }
+                    "battery_status" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            raw_device_info.battery_status = Some(value);
+                        }
+                    }
+                    "battery_level" => {
+                        raw_device_info.battery_level = value_f64(field.value());
+                    }
+                    "battery_voltage" => {
+                        raw_device_info.battery_voltage = value_f64(field.value());
+                    }
+                    "ant_device_number" => {
+                        raw_device_info.ant_device_number = value_i64(field.value());
+                    }
+                    "ant_transmission_type" => {
+                        raw_device_info.ant_transmission_type = value_i64(field.value());
+                    }
+                    "ant_network" => {
+                        raw_device_info.ant_network_value = Some(value_string(field.value()));
+                        raw_device_info.ant_network_code = value_i64(field.value());
+                    }
+                    "descriptor" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            raw_device_info.descriptor = Some(value);
+                        }
+                    }
+                    "antplus_device_type" | "ble_device_type" | "local_device_type" | "device_type"
+                    | "ant_device_type" => {
+                        let value = value_string(field.value());
+                        if !value.trim().is_empty() {
+                            raw_device_info.device_types.push(RawDeviceType {
+                                field: field.name().to_string(),
+                                value,
+                                code: value_i64(field.value()),
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -450,6 +520,8 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                 device_info_creator_name = candidate_name;
                 device_info_creator_serial = candidate_serial;
             }
+
+            raw_device_info_records.push(raw_device_info);
         } else if rec.kind() == MesgNum::FileId {
             for field in rec.fields() {
                 match field.name() {
@@ -461,6 +533,9 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                         }
                         file_id_type_code = value_i64(field.value());
                     }
+                    "time_created" => {
+                        raw_file_id.time_created_ms = value_timestamp_ms(field.value());
+                    }
                     "product_name" => {
                         let value = value_string(field.value());
                         if !value.is_empty() {
@@ -470,17 +545,21 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
                     "manufacturer" => {
                         let value = value_string(field.value());
                         if !value.trim().is_empty() {
+                            raw_file_id.manufacturer_value = Some(value.clone());
                             file_id_manufacturer = Some(value);
                         }
                     }
                     "garmin_product" | "product" | "favero_product" => {
                         let value = value_string(field.value());
                         if !value.trim().is_empty() {
+                            raw_file_id.product_field = Some(field.name().to_string());
+                            raw_file_id.product_value = Some(value.clone());
                             file_id_product = Some(value);
                         }
                     }
                     "serial_number" => {
                         file_id_serial_number = value_i64(field.value()).filter(|v| *v > 0);
+                        raw_file_id.serial_number = file_id_serial_number;
                     }
                     _ => {}
                 }
@@ -623,9 +702,13 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         file_id_product,
     );
 
+    let decoded_file_id_metadata = decoded_file_id(&raw_file_id);
+    let decoded_file_id_name = decoded_file_id_display_name(&decoded_file_id_metadata);
+
     if device.is_empty() {
         device = device_info_creator_name
             .clone()
+            .or(decoded_file_id_name)
             .or(file_id_combined_name.clone())
             .or(device_info_fallback_name.clone())
             .unwrap_or_default();
@@ -634,6 +717,7 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let resolved_serial_number = file_id_serial_number
         .or(device_info_creator_serial)
         .or(device_info_fallback_serial);
+    let device_entries = build_devices(&raw_device_info_records);
 
     let metadata_json = serde_json::json!({
         "record_count": points.len(),
@@ -645,10 +729,15 @@ fn parse_fit_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
             "serial_number": resolved_serial_number
         },
         "device_info": {
+            "schema_version": 1,
+            "source_support": "full",
             "creator_product_name": device_info_creator_name,
             "creator_serial_number": device_info_creator_serial,
             "fallback_product_name": device_info_fallback_name,
-            "fallback_serial_number": device_info_fallback_serial
+            "fallback_serial_number": device_info_fallback_serial,
+            "decoded_file_id": decoded_file_id_metadata,
+            "devices": device_entries,
+            "raw_device_info_record_count": raw_device_info_records.len()
         },
         "activity_metrics": {
             "vo2_max": vo2_max

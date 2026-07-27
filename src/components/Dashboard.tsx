@@ -30,51 +30,18 @@ import {
   speedLabel,
 } from "../lib/units";
 import { useTranslation } from "../lib/i18n";
+import {
+  formatDeviceLabel,
+  getAccessoryDevices,
+  getPrimaryDeviceLabel,
+  parseActivityMetadata,
+} from "../lib/deviceMetadata";
 
 type Props = { onLogout: () => Promise<void> };
 
 type VersionBadgeStatus = {
   state: "hidden" | "latest" | "update";
   latestVersion: string | null;
-};
-
-type ActivityMetadata = {
-  heart_rate_zone_bounds_bpm?: number[];
-  file_id?: {
-    product_name?: string | null;
-    serial_number?: number | null;
-  };
-  activity_metrics?: {
-    vo2_max?: number | null;
-  };
-  session?: {
-    beginning_body_battery?: number | null;
-    ending_body_battery?: number | null;
-    max_heart_rate?: number | null;
-    avg_heart_rate?: number | null;
-    max_cadence?: number | null;
-    avg_cadence?: number | null;
-    total_elapsed_time_s?: number | null;
-    total_distance_m?: number | null;
-    total_calories?: number | null;
-  };
-  laps?: Array<{
-    start_ts_utc?: string | null;
-    end_ts_utc?: string | null;
-    total_elapsed_time_s?: number | null;
-    total_timer_time_s?: number | null;
-    total_distance_m?: number | null;
-    avg_speed_m_s?: number | null;
-    max_speed_m_s?: number | null;
-    avg_heart_rate?: number | null;
-    max_heart_rate?: number | null;
-    total_ascent_m?: number | null;
-    total_descent_m?: number | null;
-    avg_cadence?: number | null;
-    max_cadence?: number | null;
-    total_calories?: number | null;
-    best_speed_m_s?: number | null;
-  }>;
 };
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
@@ -107,15 +74,7 @@ function shortenFileName(name: string, maxLength = 45): string {
   return `${name.slice(0, maxLength)}...`;
 }
 
-function parseActivityMetadata(raw?: string): ActivityMetadata | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as ActivityMetadata;
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
+
 
 function isTauriRuntime(): boolean {
   return isTauri();
@@ -1022,9 +981,13 @@ export function Dashboard({ onLogout }: Props) {
       .filter((ts) => !!ts),
     [selectedMetadata]
   );
-  const deviceBadgeSerial = typeof selectedMetadata?.file_id?.serial_number === "number"
-    ? String(selectedMetadata.file_id.serial_number)
+  const deviceBadgeLabel = selectedActivity
+    ? getPrimaryDeviceLabel(selectedMetadata, selectedActivity)
     : "";
+  const accessoryDevices = useMemo(
+    () => getAccessoryDevices(selectedMetadata),
+    [selectedMetadata]
+  );
   const detailStats = useMemo(() => {
     if (!selectedActivity) return [] as Array<{ key: string; label: string; value: string; secondary?: string; icon: Icon }>;
     const out: Array<{ key: string; label: string; value: string; secondary?: string; icon: Icon }> = [];
@@ -1563,7 +1526,23 @@ export function Dashboard({ onLogout }: Props) {
                   <div className="detail-badges">
                     <span className="badge">{formatDate(selectedActivity.start_ts_utc)}</span>
                     {selectedActivity.sport && <span className="badge sport">{selectedActivity.sport}</span>}
-                    {deviceBadgeSerial && <span className="badge device">SN {deviceBadgeSerial}</span>}
+                    {deviceBadgeLabel && (
+                      <span
+                        className={`badge device${accessoryDevices.length > 0 ? " has-accessories" : ""}`}
+                        tabIndex={accessoryDevices.length > 0 ? 0 : undefined}
+                      >
+                        {deviceBadgeLabel}
+                        {accessoryDevices.length > 0 && (
+                          <span className="device-accessory-popover">
+                            {accessoryDevices.map((device, index) => (
+                              <span key={`${formatDeviceLabel(device)}-${index}`} className="device-accessory-row">
+                                <span>{formatDeviceLabel(device)}</span>
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </span>
+                    )}
                     <label className="detail-toggle-badge" title={t("detail.smoothGraphsTooltip")}>
                       <input
                         type="checkbox"
