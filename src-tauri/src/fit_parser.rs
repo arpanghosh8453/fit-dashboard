@@ -242,6 +242,17 @@ fn total_distance_m(points: &[RecordPoint]) -> f64 {
         .unwrap_or(0.0)
 }
 
+fn normalize_record_distances_to_zero(points: &mut [RecordPoint]) {
+    let Some(first_distance_m) = points.iter().find_map(|p| p.distance_m) else {
+        return;
+    };
+
+    for point in points.iter_mut().filter(|p| p.distance_m.is_some()) {
+        let distance_m = point.distance_m.unwrap() - first_distance_m;
+        point.distance_m = Some(distance_m.max(0.0));
+    }
+}
+
 fn first_valid_coordinates(points: &[RecordPoint]) -> (Option<f64>, Option<f64>) {
     if let Some(point) = points
         .iter()
@@ -721,6 +732,18 @@ fn parse_tcx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let mut points = Vec::new();
     let mut min_ts: Option<i64> = None;
     let mut max_ts: Option<i64> = None;
+    let mut lap_distance_m = 0.0;
+
+    for lap in activity_node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Lap")
+    {
+        if let Some(distance_m) = child_f64(lap, "DistanceMeters")
+            .filter(|d| d.is_finite() && *d > 0.0)
+        {
+            lap_distance_m += distance_m;
+        }
+    }
 
     for tp in activity_node
         .descendants()
@@ -794,11 +817,16 @@ fn parse_tcx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
     let start_ts = min_ts.ok_or_else(|| anyhow!("TCX file had no timestamped trackpoints"))?;
     let end_ts = max_ts.unwrap_or(start_ts);
 
+    normalize_record_distances_to_zero(&mut points);
     derive_distance_if_missing(&mut points);
     derive_speed_if_missing(&mut points);
 
     let duration_s = ((end_ts - start_ts).max(0) as f64) / 1000.0;
-    let distance_m = total_distance_m(&points);
+    let distance_m = if lap_distance_m > 0.0 {
+        lap_distance_m
+    } else {
+        total_distance_m(&points)
+    };
     let (start_latitude, start_longitude) = first_valid_coordinates(&points);
 
     let metadata_json = serde_json::json!({
@@ -978,4 +1006,75 @@ fn parse_gpx_bytes(file_name: &str, bytes: &[u8]) -> Result<ParsedActivity> {
         records: points,
         metadata_json,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tcx_with_lap_distance(lap_distance: Option<f64>) -> String {
+        let lap_distance_xml = lap_distance
+            .map(|distance| format!("        <DistanceMeters>{distance}</DistanceMeters>\n"))
+            .unwrap_or_default();
+
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities>
+    <Activity Sport="Other">
+      <Id>2026-01-01T00:00:00.000Z</Id>
+      <Lap StartTime="2026-01-01T00:00:00.000Z">
+        <TotalTimeSeconds>291.924</TotalTimeSeconds>
+{lap_distance_xml}        <Calories>1</Calories>
+        <Track>
+          <Trackpoint>
+            <Time>2026-01-01T00:00:00.000Z</Time>
+            <DistanceMeters>40330.828125</DistanceMeters>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-01-01T00:02:25.000Z</Time>
+            <DistanceMeters>40395.000000</DistanceMeters>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2026-01-01T00:04:51.000Z</Time>
+            <DistanceMeters>40463.1796875</DistanceMeters>
+          </Trackpoint>
+        </Track>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>
+"#
+        )
+    }
+
+    #[test]
+    fn tcx_uses_lap_distance_and_normalizes_offset_record_distances() {
+        let activity = parse_tcx_bytes(
+            "offset-distance.tcx",
+            tcx_with_lap_distance(Some(132.35)).as_bytes(),
+        )
+        .expect("TCX should parse");
+
+        assert!((activity.distance_m - 132.35).abs() < 0.001);
+        assert_eq!(activity.records[0].distance_m, Some(0.0));
+        assert!(
+            (activity.records[2].distance_m.unwrap() - 132.3515625).abs() < 0.001
+        );
+    }
+
+    #[test]
+    fn tcx_falls_back_to_normalized_record_distance_without_lap_distance() {
+        let activity = parse_tcx_bytes(
+            "offset-distance.tcx",
+            tcx_with_lap_distance(None).as_bytes(),
+        )
+        .expect("TCX should parse");
+
+        assert!((activity.distance_m - 132.3515625).abs() < 0.001);
+        assert_eq!(activity.records[0].distance_m, Some(0.0));
+        assert!(
+            (activity.records[2].distance_m.unwrap() - 132.3515625).abs() < 0.001
+        );
+    }
 }
