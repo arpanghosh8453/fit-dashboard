@@ -4,6 +4,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       args:
+        CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-}
         VITE_API_BASE: /api
     container_name: fit-dashboard
     hostname: fit-dashboard
