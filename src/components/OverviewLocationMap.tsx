@@ -41,8 +41,14 @@ const BASEMAPS: Record<"light" | "dark" | "openstreet" | "topo" | "satellite", B
   },
 };
 
-function styleFromMap(ms: MapStyle, theme: "light" | "dark"): StyleSpecification {
+function styleFromMap(ms: MapStyle, theme: "light" | "dark"): StyleSpecification | string {
   const actualStyle = ms === "default" ? theme : ms;
+  if (actualStyle === "light") {
+    return "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+  }
+  if (actualStyle === "dark") {
+    return "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+  }
   const s = BASEMAPS[actualStyle as keyof typeof BASEMAPS];
   return {
     version: 8,
